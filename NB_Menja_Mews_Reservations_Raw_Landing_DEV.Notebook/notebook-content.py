@@ -194,22 +194,38 @@ if reservations:
 
 # CELL ********************
 
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 # =======================================================
-# PAGING + FILE WRITING — reservations raw landing
-# Chunks the window (D-153), pages each chunk (D-153),
-# writes each page as raw JSON (D-148, D-151).
-# No log tables yet — that's the next cell.
+# EXTRACTION + D-186 LOGGING — reservations raw landing
+# Writes raw JSON (D-148, D-151) AND logs to two Delta
+# tables (D-186): ExtractionRunLog, ExtractionFileLog.
 # =======================================================
 
 import os
-from datetime import timedelta
+import uuid
+from datetime import timedelta, datetime, timezone
 
-# Endpoint subfolder under the raw root (D-151)
 RES_DIR = f"{RAW_ROOT}/reservations"
 os.makedirs(RES_DIR, exist_ok=True)
 
+PMS = "MEWS"
+# Generate a fresh, unique RunID every time this cell runs (D-186).
+RUN_ID = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S_%f") + "_" + uuid.uuid4().hex[:6]
+RUN_TS = RUN_ID  # filenames use the same unique stamp
+
+# Collect log rows in memory, write to Delta at the end
+file_log_rows = []
+
 def daterange_chunks(start, end, chunk_days):
-    """Yield (chunk_start, chunk_end) windows of chunk_days each."""
     cur = start
     while cur < end:
         chunk_end = min(cur + timedelta(days=chunk_days), end)
@@ -217,7 +233,6 @@ def daterange_chunks(start, end, chunk_days):
         cur = chunk_end
 
 def write_page(chunk_start, chunk_end, page_index, page_json):
-    """Write one page of raw JSON to the lakehouse (D-148, D-151)."""
     start_str = chunk_start.strftime("%Y%m%d")
     end_str = chunk_end.strftime("%Y%m%d")
     filename = (
@@ -229,46 +244,256 @@ def write_page(chunk_start, chunk_end, page_index, page_json):
         json.dump(page_json, f, ensure_ascii=False)
     return filename, filepath
 
-# --- Main extraction loop ---
+# --- Run-level tracking ---
+run_start = datetime.now(timezone.utc)
+status = "Success"
+error_message = None
 total_reservations = 0
 total_files = 0
+hit_cap_with_more = False
 
-for chunk_start, chunk_end in daterange_chunks(
-    WINDOW_START_UTC, WINDOW_END_UTC, RES_CHUNK_DAYS
-):
-    print(f"\nChunk: {chunk_start.date()} to {chunk_end.date()}")
-    cursor = None
-    page_index = 0
+try:
+    for chunk_start, chunk_end in daterange_chunks(
+        WINDOW_START_UTC, WINDOW_END_UTC, RES_CHUNK_DAYS
+    ):
+        print(f"\nChunk: {chunk_start.date()} to {chunk_end.date()}")
+        cursor = None
+        page_index = 0
 
-    while page_index < RES_MAX_PAGES_PER_CHUNK:
-        extra_body = {
-            "ServiceIds": [SERVICE_ID],
-            "CollidingUtc": {
-                "StartUtc": fmt_utc(chunk_start),
-                "EndUtc": fmt_utc(chunk_end),
-            },
-        }
-        result = mews_post(RESERVATIONS_ENDPOINT, extra_body, cursor=cursor)
+        while page_index < RES_MAX_PAGES_PER_CHUNK:
+            extra_body = {
+                "ServiceIds": [SERVICE_ID],
+                "CollidingUtc": {
+                    "StartUtc": fmt_utc(chunk_start),
+                    "EndUtc": fmt_utc(chunk_end),
+                },
+            }
+            result = mews_post(RESERVATIONS_ENDPOINT, extra_body, cursor=cursor)
+            page = result.get("Reservations", [])
+            if not page:
+                print("  No more reservations in this chunk.")
+                break
 
-        page = result.get("Reservations", [])
-        if not page:
-            print("  No more reservations in this chunk.")
-            break
+            page_index += 1
+            fname, fpath = write_page(chunk_start, chunk_end, page_index, result)
+            total_reservations += len(page)
+            total_files += 1
 
-        page_index += 1
-        fname, fpath = write_page(chunk_start, chunk_end, page_index, result)
-        total_reservations += len(page)
-        total_files += 1
-        print(f"  Page {page_index}: {len(page)} reservations -> {fname}")
+            # D-186 file log row — one per file
+            file_log_rows.append({
+                "FileID": str(uuid.uuid4()),
+                "RunID": RUN_ID,
+                "PMS": PMS,
+                "Endpoint": RESERVATIONS_ENDPOINT,
+                "PageOrChunkIndex": page_index,
+                "FileName": fname,
+                "FilePath": fpath,
+                "RecordCount": len(page),
+                "WrittenUtc": datetime.now(timezone.utc).isoformat(),
+            })
+            print(f"  Page {page_index}: {len(page)} reservations -> {fname}")
 
-        cursor = result.get("Cursor")
-        if not cursor:
-            break
+            cursor = result.get("Cursor")
+            if not cursor:
+                break
 
-    if page_index >= RES_MAX_PAGES_PER_CHUNK and cursor:
-        print(f"  Hit page cap ({RES_MAX_PAGES_PER_CHUNK}). More data may remain.")
+        if page_index >= RES_MAX_PAGES_PER_CHUNK and cursor:
+            hit_cap_with_more = True
+            print(f"  Hit page cap ({RES_MAX_PAGES_PER_CHUNK}). More data may remain.")
 
-print(f"\nDONE. Total reservations: {total_reservations}, files written: {total_files}")
+    if hit_cap_with_more:
+        status = "Partial"
+
+except Exception as e:
+    status = "Failed"
+    error_message = str(e)
+    print(f"\nRUN FAILED: {e}")
+
+run_end = datetime.now(timezone.utc)
+
+# --- Build the two log tables as Delta (D-186) ---
+from pyspark.sql.types import (
+    StructType, StructField, StringType, IntegerType
+)
+
+run_log_schema = StructType([
+    StructField("RunID", StringType(), False),
+    StructField("PMS", StringType(), False),
+    StructField("Endpoint", StringType(), False),
+    StructField("WindowStartUtc", StringType(), True),
+    StructField("WindowEndUtc", StringType(), True),
+    StructField("RunStartUtc", StringType(), True),
+    StructField("RunEndUtc", StringType(), True),
+    StructField("Status", StringType(), False),
+    StructField("PagesWritten", IntegerType(), True),
+    StructField("RecordCount", IntegerType(), True),
+    StructField("ErrorMessage", StringType(), True),
+])
+
+file_log_schema = StructType([
+    StructField("FileID", StringType(), False),
+    StructField("RunID", StringType(), False),
+    StructField("PMS", StringType(), False),
+    StructField("Endpoint", StringType(), False),
+    StructField("PageOrChunkIndex", IntegerType(), True),
+    StructField("FileName", StringType(), True),
+    StructField("FilePath", StringType(), True),
+    StructField("RecordCount", IntegerType(), True),
+    StructField("WrittenUtc", StringType(), True),
+])
+
+run_log_df = spark.createDataFrame(run_log_rows, schema=run_log_schema)
+run_log_df.write.format("delta").mode("append").saveAsTable("ExtractionRunLog")
+
+if file_log_rows:
+    file_log_df = spark.createDataFrame(file_log_rows, schema=file_log_schema)
+    file_log_df.write.format("delta").mode("append").saveAsTable("ExtractionFileLog")
+
+print(f"\nDONE. Status: {status}")
+print(f"Reservations: {total_reservations}, files: {total_files}")
+print(f"Logged to ExtractionRunLog and ExtractionFileLog (RunID: {RUN_ID})")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# Quick check — list what landed in the reservations folder
+import os
+files = sorted(os.listdir(RES_DIR))
+print(f"Files in {RES_DIR}:")
+for f in files:
+    size = os.path.getsize(f"{RES_DIR}/{f}")
+    print(f"  {f}  ({size:,} bytes)")
+print(f"\nTotal files: {len(files)}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# Check the two D-186 log tables
+print("=== ExtractionRunLog ===")
+spark.sql("SELECT * FROM ExtractionRunLog").show(truncate=False)
+
+print("=== ExtractionFileLog ===")
+spark.sql("SELECT FileID, RunID, PageOrChunkIndex, FileName, RecordCount FROM ExtractionFileLog").show(truncate=False)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+spark.sql("DROP TABLE IF EXISTS ExtractionRunLog")
+spark.sql("DROP TABLE IF EXISTS ExtractionFileLog")
+print("Log tables cleared.")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import os, glob
+old = glob.glob(f"{RAW_ROOT}/reservations/*.json")
+for f in old:
+    os.remove(f)
+print(f"Removed {len(old)} old files. Clean slate.")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# Force-clear both log tables by deleting all rows
+spark.sql("DELETE FROM ExtractionRunLog")
+spark.sql("DELETE FROM ExtractionFileLog")
+
+# Confirm they're empty
+print("RunLog rows:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionRunLog").collect()[0]["n"])
+print("FileLog rows:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionFileLog").collect()[0]["n"])
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# Diagnosis — what's actually in each table and where
+print("RUN LOG count:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionRunLog").collect()[0]["n"])
+print("FILE LOG count:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionFileLog").collect()[0]["n"])
+print()
+print("Distinct RunIDs in RUN log:")
+spark.sql("SELECT DISTINCT RunID FROM ExtractionRunLog").show(truncate=False)
+print("Distinct RunIDs in FILE log:")
+spark.sql("SELECT DISTINCT RunID FROM ExtractionFileLog").show(truncate=False)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+spark.sql("DELETE FROM ExtractionRunLog")
+spark.sql("DELETE FROM ExtractionFileLog")
+print("RunLog:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionRunLog").collect()[0]["n"])
+print("FileLog:", spark.sql("SELECT COUNT(*) AS n FROM ExtractionFileLog").collect()[0]["n"])
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import os, glob
+old = glob.glob(f"{RAW_ROOT}/reservations/*.json")
+for f in old:
+    os.remove(f)
+print(f"Removed {len(old)} files.")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print("Distinct RunIDs in RUN log:")
+spark.sql("SELECT DISTINCT RunID FROM ExtractionRunLog").show(truncate=False)
+print("Distinct RunIDs in FILE log:")
+spark.sql("SELECT DISTINCT RunID FROM ExtractionFileLog").show(truncate=False)
 
 # METADATA ********************
 

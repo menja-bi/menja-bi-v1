@@ -311,6 +311,21 @@ except Exception as e:
 
 run_end = datetime.now(timezone.utc)
 
+# D-186 run log row — one per run
+run_log_rows = [{
+    "RunID": RUN_ID,
+    "PMS": PMS,
+    "Endpoint": RESERVATIONS_ENDPOINT,
+    "WindowStartUtc": WINDOW_START_UTC.isoformat(),
+    "WindowEndUtc": WINDOW_END_UTC.isoformat(),
+    "RunStartUtc": run_start.isoformat(),
+    "RunEndUtc": run_end.isoformat(),
+    "Status": status,
+    "PagesWritten": total_files,
+    "RecordCount": total_reservations,
+    "ErrorMessage": error_message,
+}]
+
 # --- Build the two log tables as Delta (D-186) ---
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType

@@ -1,0 +1,21 @@
+{
+  "_decision_ref": "D-188 (DRAFT) — confirm against real-hotel data before FINAL",
+  "_status": "DRAFT — provisional, pending real-hotel validation",
+  "trigger_fields": [
+    "PMSStatusCode",
+    "ArrivalDate",
+    "DepartureDate",
+    "BookedRooms",
+    "BookedRoomRevenue",
+    "BookedTotalRevenue",
+    "PMS_RatePlanCode",
+    "PMS_SegmentCode",
+    "PMS_ChannelCode",
+    "PMS_RoomTypeCode",
+    "Adults",
+    "Children",
+    "BlockID",
+    "IsGroupReservation",
+    "IsBlockPickupReservation"
+  ]
+}

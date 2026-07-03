@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": " NB_Menja_Phase1_Mews_I_Reservations_Plan"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "81baca03-947d-9dcf-4acb-87f80865a54b"
+  }
+}

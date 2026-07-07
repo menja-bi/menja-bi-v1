@@ -88,7 +88,7 @@ FILE_LOG_TABLE = "ExtractionFileLog"
 
 # --- endpoint names as they appear in ExtractionRunLog.Endpoint ---
 # CONFIRM against the discovery cell in Section 2 before running Section 3.
-RESERVATIONS_ENDPOINT   = "reservations/getAll"     # <-- CONFIRM exact value
+RESERVATIONS_ENDPOINT   = "reservations/getAll/2023-06-06"     # exact value from ExtractionRunLog.Endpoint
 SERVICES_ENDPOINT       = "services/getAll"
 AGE_CATEGORIES_ENDPOINT = "ageCategories/getAll"
 

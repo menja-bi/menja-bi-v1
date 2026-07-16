@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "Menja BI v1 Semantic Model - DEV"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "4a38fe52-8af4-bb71-4484-e554741fd0ee"
+  }
+}

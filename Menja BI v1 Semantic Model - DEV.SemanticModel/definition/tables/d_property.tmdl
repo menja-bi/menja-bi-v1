@@ -1,0 +1,139 @@
+table d_property
+	lineageTag: bdbf808f-babd-4727-a6ca-26a896b3fbbf
+	sourceLineageTag: [dbo].[d_property]
+
+	column PropertyKey
+		dataType: string
+		lineageTag: 950d59fc-433d-4ce5-bff9-0fb33f93d9a4
+		sourceLineageTag: PropertyKey
+		summarizeBy: none
+		sourceColumn: PropertyKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column PropertyID
+		dataType: string
+		lineageTag: b76ffc51-c16d-49cf-8138-543286c7664f
+		sourceLineageTag: PropertyID
+		summarizeBy: none
+		sourceColumn: PropertyID
+
+		annotation SummarizationSetBy = Automatic
+
+	column PropertyName
+		dataType: string
+		lineageTag: 7762ff9e-985b-4f5f-a139-7ab43b5f869c
+		sourceLineageTag: PropertyName
+		summarizeBy: none
+		sourceColumn: PropertyName
+
+		annotation SummarizationSetBy = Automatic
+
+	column PropertyCode
+		dataType: string
+		lineageTag: c989a452-f6c7-4e58-8f7d-1e7f90ad876f
+		sourceLineageTag: PropertyCode
+		summarizeBy: none
+		sourceColumn: PropertyCode
+
+		annotation SummarizationSetBy = Automatic
+
+	column Brand
+		dataType: string
+		lineageTag: f80f90a0-5275-4cf4-913c-c30fcfcab1a5
+		sourceLineageTag: Brand
+		summarizeBy: none
+		sourceColumn: Brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column Chain
+		dataType: string
+		lineageTag: 49b30813-453a-4c89-b521-da8c9b960336
+		sourceLineageTag: Chain
+		summarizeBy: none
+		sourceColumn: Chain
+
+		annotation SummarizationSetBy = Automatic
+
+	column Country
+		dataType: string
+		lineageTag: 31dd4baf-7e1a-446b-a026-21e20a7c39bd
+		sourceLineageTag: Country
+		summarizeBy: none
+		sourceColumn: Country
+
+		annotation SummarizationSetBy = Automatic
+
+	column City
+		dataType: string
+		lineageTag: 57f6a5a2-8086-4679-ae6a-c2bc1f75db0b
+		sourceLineageTag: City
+		summarizeBy: none
+		sourceColumn: City
+
+		annotation SummarizationSetBy = Automatic
+
+	column TimeZone
+		dataType: string
+		lineageTag: 9eacf8ac-4efb-4c35-8ebc-2e99fdef7881
+		sourceLineageTag: TimeZone
+		summarizeBy: none
+		sourceColumn: TimeZone
+
+		annotation SummarizationSetBy = Automatic
+
+	column TotalPhysicalRooms
+		dataType: int64
+		formatString: 0
+		lineageTag: a5d31558-4482-4d33-bcab-7b6efb7075c9
+		sourceLineageTag: TotalPhysicalRooms
+		summarizeBy: sum
+		sourceColumn: TotalPhysicalRooms
+
+		annotation SummarizationSetBy = Automatic
+
+	column OpenDate
+		dataType: string
+		lineageTag: 6671aced-0e3f-4d65-b45c-52119ac6cdb9
+		sourceLineageTag: OpenDate
+		summarizeBy: none
+		sourceColumn: OpenDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column CurrencyCode
+		dataType: string
+		lineageTag: 322e7e5e-eeed-46d7-bb1f-806daffe2a06
+		sourceLineageTag: CurrencyCode
+		summarizeBy: none
+		sourceColumn: CurrencyCode
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsActive
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 1a36574d-c59b-46f5-9801-9ef3d5b4adfe
+		sourceLineageTag: IsActive
+		summarizeBy: none
+		sourceColumn: IsActive
+
+		annotation SummarizationSetBy = Automatic
+
+	column PMS_PropertyCode
+		dataType: string
+		lineageTag: a0ce72f8-d075-4b80-8120-0667b5f4af1d
+		sourceLineageTag: PMS_PropertyCode
+		summarizeBy: none
+		sourceColumn: PMS_PropertyCode
+
+		annotation SummarizationSetBy = Automatic
+
+	partition d_property = entity
+		mode: directLake
+		source
+			entityName: d_property
+			schemaName: dbo
+			expressionSource: 'DirectLake - LH_Menja_BI_v1_Mews_DEV'
+

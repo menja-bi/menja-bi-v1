@@ -1,0 +1,12 @@
+relationship Rel_FactRN_to_DDate
+	fromColumn: f_roomnights.StayDate
+	toColumn: d_date.Date
+
+relationship Rel_FactRN_to_DProperty
+	fromColumn: f_roomnights.PropertyKey
+	toColumn: d_property.PropertyKey
+
+relationship Rel_FactRN_to_DResStatus
+	fromColumn: f_roomnights.ReservationStatusKey
+	toColumn: d_reservationstatus.ReservationStatusKey
+

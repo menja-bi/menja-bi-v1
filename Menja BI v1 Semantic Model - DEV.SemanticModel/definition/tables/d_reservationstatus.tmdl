@@ -1,0 +1,58 @@
+table d_reservationstatus
+	lineageTag: 90acce21-c239-49cc-8668-7a4efab8b40d
+	sourceLineageTag: [dbo].[d_reservationstatus]
+
+	column ReservationStatusKey
+		dataType: string
+		lineageTag: 26a6c0ea-1e27-4f3f-a5ec-ae81c4316832
+		sourceLineageTag: ReservationStatusKey
+		summarizeBy: none
+		sourceColumn: ReservationStatusKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column ReservationStatusID
+		dataType: string
+		lineageTag: bd9280d3-d850-4699-8521-1a0d3a153052
+		sourceLineageTag: ReservationStatusID
+		summarizeBy: none
+		sourceColumn: ReservationStatusID
+
+		annotation SummarizationSetBy = Automatic
+
+	column ReservationStatusName
+		dataType: string
+		lineageTag: f07e8911-fac7-43bb-8ceb-257bcdd13366
+		sourceLineageTag: ReservationStatusName
+		summarizeBy: none
+		sourceColumn: ReservationStatusName
+
+		annotation SummarizationSetBy = Automatic
+
+	column InventoryDeduct
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 37c88d0b-c490-4c7e-bf0a-ad4c6b86b237
+		sourceLineageTag: InventoryDeduct
+		summarizeBy: none
+		sourceColumn: InventoryDeduct
+
+		annotation SummarizationSetBy = Automatic
+
+	column SortOrder
+		dataType: int64
+		formatString: 0
+		lineageTag: 29d89d49-bb0e-4b3a-ae9c-18888a9cf498
+		sourceLineageTag: SortOrder
+		summarizeBy: sum
+		sourceColumn: SortOrder
+
+		annotation SummarizationSetBy = Automatic
+
+	partition d_reservationstatus = entity
+		mode: directLake
+		source
+			entityName: d_reservationstatus
+			schemaName: dbo
+			expressionSource: 'DirectLake - LH_Menja_BI_v1_Mews_DEV'
+

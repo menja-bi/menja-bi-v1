@@ -1,0 +1,11 @@
+expression 'DirectLake - LH_Menja_BI_v1_Mews_DEV' =
+		let
+		    Source = AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/edeabf05-3395-4b50-9140-7f034cd65e9d/3417eac3-01d7-49dd-905f-ed6179565f84", [HierarchicalNavigation=true])
+		in
+		    Source
+	lineageTag: 9066c6c2-4e4e-4189-95b3-88e830ed546f
+
+	annotation PBI_IncludeFutureArtifacts = False
+
+	annotation PBI_RemovedChildren = [{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dbo].[extractionrunlog]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dbo].[i_roomnights]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dbo].[extractionfilelog]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dbo].[i_reservations]"}},"objectType":"Table"}]
+

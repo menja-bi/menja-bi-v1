@@ -1,0 +1,325 @@
+table f_roomnights
+	lineageTag: e8e6dd3c-0a40-4301-bdb2-3f3656f859e4
+	sourceLineageTag: [dbo].[f_roomnights]
+
+	column RoomNightID
+		dataType: string
+		lineageTag: c6203c7c-ecaf-4ba3-92dd-7e04d5314851
+		sourceLineageTag: RoomNightID
+		summarizeBy: none
+		sourceColumn: RoomNightID
+
+		annotation SummarizationSetBy = Automatic
+
+	column ReservationID
+		dataType: string
+		lineageTag: e880f550-6b17-4307-92e8-430df022bdc7
+		sourceLineageTag: ReservationID
+		summarizeBy: none
+		sourceColumn: ReservationID
+
+		annotation SummarizationSetBy = Automatic
+
+	column PropertyKey
+		dataType: string
+		lineageTag: a36395c1-199f-46fd-820e-0ced884b6cbc
+		sourceLineageTag: PropertyKey
+		summarizeBy: none
+		sourceColumn: PropertyKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column PropertyID
+		dataType: string
+		lineageTag: 5202d825-b100-45ac-a6c8-f1ee787e4b1d
+		sourceLineageTag: PropertyID
+		summarizeBy: none
+		sourceColumn: PropertyID
+
+		annotation SummarizationSetBy = Automatic
+
+	column StayDate
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: e327df96-4ad3-4a01-9224-498ecc4d95c2
+		sourceLineageTag: StayDate
+		summarizeBy: none
+		sourceColumn: StayDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column SnapshotDateTime
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 6b4d325d-3fec-4cb6-babd-9d5afb06274d
+		sourceLineageTag: SnapshotDateTime
+		summarizeBy: none
+		sourceColumn: SnapshotDateTime
+
+		annotation SummarizationSetBy = Automatic
+
+	column RoomTypeKey
+		dataType: string
+		lineageTag: 89c9e4b2-a036-4074-b513-17f344607665
+		sourceLineageTag: RoomTypeKey
+		summarizeBy: none
+		sourceColumn: RoomTypeKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column RatePlanKey
+		dataType: string
+		lineageTag: aea19927-c8f6-4431-9bea-067167208ed8
+		sourceLineageTag: RatePlanKey
+		summarizeBy: none
+		sourceColumn: RatePlanKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column ChannelKey
+		dataType: string
+		lineageTag: 584da353-0d32-409c-83d0-a32a690c5c5e
+		sourceLineageTag: ChannelKey
+		summarizeBy: none
+		sourceColumn: ChannelKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column SegmentKey
+		dataType: string
+		lineageTag: 9c14b543-c188-4172-9166-f9dc7a45b56d
+		sourceLineageTag: SegmentKey
+		summarizeBy: none
+		sourceColumn: SegmentKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column ReservationStatusKey
+		dataType: string
+		lineageTag: 36bc9b4e-42a4-41ec-9790-3571b15af629
+		sourceLineageTag: ReservationStatusKey
+		summarizeBy: none
+		sourceColumn: ReservationStatusKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column MarketCountryKey
+		dataType: string
+		lineageTag: 5f5791ae-ff14-4104-ac6d-4f6f54a61c91
+		sourceLineageTag: MarketCountryKey
+		summarizeBy: none
+		sourceColumn: MarketCountryKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column BlockID
+		dataType: string
+		lineageTag: 3046dfa8-e05c-495b-923e-7810163dfc18
+		sourceLineageTag: BlockID
+		summarizeBy: none
+		sourceColumn: BlockID
+
+		annotation SummarizationSetBy = Automatic
+
+	column EventID
+		dataType: string
+		lineageTag: c081ff9d-7a88-4b27-a387-7bd029c1e318
+		sourceLineageTag: EventID
+		summarizeBy: none
+		sourceColumn: EventID
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsGroupReservation
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: eb63f4e7-d020-44ec-b7be-d1f79caabee0
+		sourceLineageTag: IsGroupReservation
+		summarizeBy: none
+		sourceColumn: IsGroupReservation
+
+		annotation SummarizationSetBy = Automatic
+
+	column BookingDateTime
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 6d651cc2-565c-480e-ae9c-6c23d2d80c81
+		sourceLineageTag: BookingDateTime
+		summarizeBy: none
+		sourceColumn: BookingDateTime
+
+		annotation SummarizationSetBy = Automatic
+
+	column ArrivalDate
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 28ad16ae-122d-472d-b809-e6e968ebc47f
+		sourceLineageTag: ArrivalDate
+		summarizeBy: none
+		sourceColumn: ArrivalDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column DepartureDate
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 880e1abf-2ce7-47b2-99bf-0fbe85d7d7f5
+		sourceLineageTag: DepartureDate
+		summarizeBy: none
+		sourceColumn: DepartureDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column LOS_Nights
+		dataType: int64
+		formatString: 0
+		lineageTag: fcca68f6-a30e-4f85-a2a7-bf4778f4b512
+		sourceLineageTag: LOS_Nights
+		summarizeBy: sum
+		sourceColumn: LOS_Nights
+
+		annotation SummarizationSetBy = Automatic
+
+	column BookingWindowDays
+		dataType: int64
+		formatString: 0
+		lineageTag: 69de9664-acf5-419a-837e-356765ff1439
+		sourceLineageTag: BookingWindowDays
+		summarizeBy: sum
+		sourceColumn: BookingWindowDays
+
+		annotation SummarizationSetBy = Automatic
+
+	column CurrencyCode
+		dataType: string
+		lineageTag: 65532353-0b6a-4e9e-83d9-e4cdb42b8ac6
+		sourceLineageTag: CurrencyCode
+		summarizeBy: none
+		sourceColumn: CurrencyCode
+
+		annotation SummarizationSetBy = Automatic
+
+	column BookedRoomRevenue_RoomNight
+		dataType: double
+		lineageTag: 4d1d618a-7f75-418f-be55-21b78474c88b
+		sourceLineageTag: BookedRoomRevenue_RoomNight
+		summarizeBy: sum
+		sourceColumn: BookedRoomRevenue_RoomNight
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column RealizedRoomRevenue_RoomNight
+		dataType: double
+		lineageTag: e0d1886e-d1eb-400d-9a44-533a5087ab12
+		sourceLineageTag: RealizedRoomRevenue_RoomNight
+		summarizeBy: sum
+		sourceColumn: RealizedRoomRevenue_RoomNight
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column RoomRevenue
+		dataType: double
+		lineageTag: 07ea86b7-5374-414a-9b2d-0e1d8fc83907
+		sourceLineageTag: RoomRevenue
+		summarizeBy: sum
+		sourceColumn: RoomRevenue
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column RevenueState
+		dataType: string
+		lineageTag: 3f9cbe16-71f2-463e-bdd1-76540bbea550
+		sourceLineageTag: RevenueState
+		summarizeBy: none
+		sourceColumn: RevenueState
+
+		annotation SummarizationSetBy = Automatic
+
+	column BookedRevenueDerivationMethod
+		dataType: string
+		lineageTag: decae884-d1e3-42ac-a686-274955957e03
+		sourceLineageTag: BookedRevenueDerivationMethod
+		summarizeBy: none
+		sourceColumn: BookedRevenueDerivationMethod
+
+		annotation SummarizationSetBy = Automatic
+
+	column RealizedRevenueDerivationMethod
+		dataType: string
+		lineageTag: 056f5704-3fe1-4888-97b2-6a6726f365cd
+		sourceLineageTag: RealizedRevenueDerivationMethod
+		summarizeBy: none
+		sourceColumn: RealizedRevenueDerivationMethod
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsBlockPickupRoomNight
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: c4a283c8-11f4-470d-a4ba-fa975974f7d2
+		sourceLineageTag: IsBlockPickupRoomNight
+		summarizeBy: none
+		sourceColumn: IsBlockPickupRoomNight
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsLatestCurrent
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 9daccbaa-a3c4-4e0f-a369-fa8b52752e8a
+		sourceLineageTag: IsLatestCurrent
+		summarizeBy: none
+		sourceColumn: IsLatestCurrent
+
+		annotation SummarizationSetBy = Automatic
+
+	column RevenueStreamKey
+		dataType: string
+		lineageTag: c916bee2-51d2-4657-bb42-39583de5808a
+		sourceLineageTag: RevenueStreamKey
+		summarizeBy: none
+		sourceColumn: RevenueStreamKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column TenantKey
+		dataType: string
+		lineageTag: e4333c1f-5461-4402-8a0b-56de40b0637b
+		sourceLineageTag: TenantKey
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column TenantID
+		dataType: string
+		lineageTag: de6aa0d4-7582-46e6-bd18-c9f36caaa66a
+		sourceLineageTag: TenantID
+		summarizeBy: none
+		sourceColumn: TenantID
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsDayUse
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: f5553445-fc77-4aa5-9604-e5afc87ed8bf
+		sourceLineageTag: IsDayUse
+		summarizeBy: none
+		sourceColumn: IsDayUse
+
+		annotation SummarizationSetBy = Automatic
+
+	partition f_roomnights = entity
+		mode: directLake
+		source
+			entityName: f_roomnights
+			schemaName: dbo
+			expressionSource: 'DirectLake - LH_Menja_BI_v1_Mews_DEV'
+

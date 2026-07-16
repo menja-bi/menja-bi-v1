@@ -1,0 +1,79 @@
+table d_date
+	lineageTag: 520b2081-2ec2-4e53-b027-a3a58b6c9968
+	sourceLineageTag: [dbo].[d_date]
+
+	column DateKey
+		dataType: int64
+		formatString: 0
+		lineageTag: 60eff40f-b912-4f1f-a8eb-51f6651e049d
+		sourceLineageTag: DateKey
+		summarizeBy: count
+		sourceColumn: DateKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 0480b20c-469c-4c00-9c53-6661adf3e6e0
+		sourceLineageTag: Date
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Year
+		dataType: int64
+		formatString: 0
+		lineageTag: e2ece2a3-b321-4313-86d5-bd0b1d91c6df
+		sourceLineageTag: Year
+		summarizeBy: sum
+		sourceColumn: Year
+
+		annotation SummarizationSetBy = Automatic
+
+	column MonthNumber
+		dataType: int64
+		formatString: 0
+		lineageTag: 7e69ad1b-a13a-44de-95a1-1d4a8c7cf93c
+		sourceLineageTag: MonthNumber
+		summarizeBy: sum
+		sourceColumn: MonthNumber
+
+		annotation SummarizationSetBy = Automatic
+
+	column MonthName
+		dataType: string
+		lineageTag: adc8271b-781b-42c4-8dd1-28a57539d7aa
+		sourceLineageTag: MonthName
+		summarizeBy: none
+		sourceColumn: MonthName
+
+		annotation SummarizationSetBy = Automatic
+
+	column WeekdayNumber
+		dataType: int64
+		formatString: 0
+		lineageTag: 93e6ad80-abaf-48f0-8772-36207b9725f9
+		sourceLineageTag: WeekdayNumber
+		summarizeBy: sum
+		sourceColumn: WeekdayNumber
+
+		annotation SummarizationSetBy = Automatic
+
+	column WeekdayName
+		dataType: string
+		lineageTag: fb46aef5-8a9f-4954-a34b-21aa45886bc7
+		sourceLineageTag: WeekdayName
+		summarizeBy: none
+		sourceColumn: WeekdayName
+
+		annotation SummarizationSetBy = Automatic
+
+	partition d_date = entity
+		mode: directLake
+		source
+			entityName: d_date
+			schemaName: dbo
+			expressionSource: 'DirectLake - LH_Menja_BI_v1_Mews_DEV'
+

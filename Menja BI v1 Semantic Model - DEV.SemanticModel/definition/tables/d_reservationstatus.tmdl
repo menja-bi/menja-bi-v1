@@ -4,6 +4,7 @@ table d_reservationstatus
 
 	column ReservationStatusKey
 		dataType: string
+		isHidden
 		lineageTag: 26a6c0ea-1e27-4f3f-a5ec-ae81c4316832
 		sourceLineageTag: ReservationStatusKey
 		summarizeBy: none
@@ -13,6 +14,7 @@ table d_reservationstatus
 
 	column ReservationStatusID
 		dataType: string
+		isHidden
 		lineageTag: bd9280d3-d850-4699-8521-1a0d3a153052
 		sourceLineageTag: ReservationStatusID
 		summarizeBy: none
@@ -26,6 +28,7 @@ table d_reservationstatus
 		sourceLineageTag: ReservationStatusName
 		summarizeBy: none
 		sourceColumn: ReservationStatusName
+		sortByColumn: SortOrder
 
 		annotation SummarizationSetBy = Automatic
 
@@ -41,10 +44,11 @@ table d_reservationstatus
 
 	column SortOrder
 		dataType: int64
+		isHidden
 		formatString: 0
 		lineageTag: 29d89d49-bb0e-4b3a-ae9c-18888a9cf498
 		sourceLineageTag: SortOrder
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: SortOrder
 
 		annotation SummarizationSetBy = Automatic

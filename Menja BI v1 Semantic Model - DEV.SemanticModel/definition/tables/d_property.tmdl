@@ -4,6 +4,7 @@ table d_property
 
 	column PropertyKey
 		dataType: string
+		isHidden
 		lineageTag: 950d59fc-433d-4ce5-bff9-0fb33f93d9a4
 		sourceLineageTag: PropertyKey
 		summarizeBy: none
@@ -13,6 +14,7 @@ table d_property
 
 	column PropertyID
 		dataType: string
+		isHidden
 		lineageTag: b76ffc51-c16d-49cf-8138-543286c7664f
 		sourceLineageTag: PropertyID
 		summarizeBy: none
@@ -88,7 +90,7 @@ table d_property
 		formatString: 0
 		lineageTag: a5d31558-4482-4d33-bcab-7b6efb7075c9
 		sourceLineageTag: TotalPhysicalRooms
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: TotalPhysicalRooms
 
 		annotation SummarizationSetBy = Automatic

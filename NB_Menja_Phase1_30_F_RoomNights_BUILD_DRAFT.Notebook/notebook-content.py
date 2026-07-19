@@ -38,8 +38,8 @@
 # | Rule | Decision / source |
 # |---|---|
 # | Build slice scope: input = built `I_RoomNights` only; carry all snapshot versions; NULL override for ungoverned columns; parameterized `D_Date` build with coverage guarantee | D-208 (FINAL, locked 14.07.2026) |
-# | Inventory-deduct row filter: keep a row only when `ReservationStatusKey` maps to `InventoryDeduct = TRUE` in `D_ReservationStatus`; applied per snapshot-version row | D-125 / C-208, classification per D-190 |
-# | Snapshot-aware fact; current state resolved later in measures as `MAX(SnapshotDateTime)` | D-143 / D-049 / C-203 |
+# | Row selection: keep **all** reservation statuses; resolve **current state at build** - keep each reservation's latest version (`MAX(SnapshotDateTime)` per `ReservationID`) | D-209 (FINAL) - supersedes the D-208/D-125 deduct row filter |
+# | Snapshot-aware fact; current state resolved **at build, per reservation** (not later in measures) | D-209 (supersedes C-203) |
 # | `F_RoomNights.RoomNightID` stays identical to `I_RoomNights.RoomNightID`; no separate key | C-198 / D-125 |
 # | `IsDayUse` carried from `I_RoomNights`; overnight KPIs exclude it by default (later, in measures) | C-415 / D-206 / D-048 |
 # | `D_Date` structure: 7 ACTIVE columns C-029..C-035; `DateKey` yyyymmdd integer, one-to-one with `Date` | D-047 / D-208 |
@@ -96,7 +96,6 @@ D_DATE_END   = "2027-12-31"   # <-- CONFIRM: must be >= latest F_RoomNights Stay
 # Full rebuild. Incremental/change-aware append logic is explicitly out of scope (D-208).
 WRITE_MODE = "overwrite"
 
-
 # METADATA ********************
 
 # META {
@@ -138,7 +137,6 @@ if session_tz != "UTC":
         "Carried timestamps were written under UTC. Do not override silently — "
         "investigate before running.")
 print("Session time zone OK: UTC")
-
 
 # METADATA ********************
 
@@ -186,7 +184,6 @@ n_prop = spark.read.table(TBL_D_PROPERTY).count()
 if n_prop == 0:
     raise RuntimeError(f"{TBL_D_PROPERTY} exists but is empty — dimension build incomplete.")
 print(f"D_Property present with {n_prop} row(s).")
-
 
 # METADATA ********************
 
@@ -250,7 +247,6 @@ for c in CARRIED_COLS:
                            "not-null on the fact. Fix upstream — no silent patching.")
 print("Carried not-null columns are clean on input.")
 
-
 # METADATA ********************
 
 # META {
@@ -260,41 +256,57 @@ print("Carried not-null columns are clean on input.")
 
 # MARKDOWN ********************
 
-# ## 5. Inventory-deduct filter (D-125 / D-190 / D-208)
+# ## 5. Current-state resolution + status resolve gate (D-209)
 # 
-# **Plain words:** a room-night belongs in the fact only if its reservation status **takes a
-# room out of inventory**. Which statuses do that is decided *only* by the
-# `D_ReservationStatus.InventoryDeduct` flag (from the governed seed): Confirmed / Started /
-# Processed deduct; Optional / Canceled / UNKNOWN do not. The filter is applied **per
-# snapshot-version row**, so a reservation that was Confirmed and later Canceled keeps its
-# Confirmed-era versions in the fact and simply has no Canceled-era versions there.
+# **Plain words:** two jobs. (1) Every reservation status is kept — Optional, Canceled and
+# UNKNOWN rows now stay in the fact (D-209 removes the old deduct filter). (2) For each
+# reservation we keep only its **latest version**: the rows whose `SnapshotDateTime` equals
+# `MAX(SnapshotDateTime)` for that `ReservationID`. Older versions drop out completely.
 # 
-# Two safety rules:
+# Two safety rules kept from before:
 # 
-# - Every status key in the input **must resolve** to a dimension row. An unmatched key would
-#   otherwise vanish through the join — that would be silent row loss, so it is a hard stop.
-# - Excluded rows are **counted and shown by status**, so nothing disappears without a trace.
-#   Exclusion here is *correct governed behaviour*, not a data-quality problem, so there is no
-#   exception table for it.
+# - Every status key in the input **must resolve** to a `D_ReservationStatus` row. An
+#   unmatched key would vanish through the join — that is silent row loss, so it is a hard stop.
+# - `InventoryDeduct` is still joined, but only as a **diagnostic split** (how many current
+#   rows deduct vs not). It no longer removes rows.
+# 
+# Why resolve at reservation grain, not on `IsLatestCurrent`: that flag is per room-night key,
+# so a shortened or moved stay would leave its dropped nights flagged TRUE ("ghost nights").
+# Taking MAX per `ReservationID` drops the whole superseded version, ghost nights included.
+
 
 # CELL ********************
 
 # ---------------------------------------------------------------
-# 5. Deduct filter with resolve gate + visible exclusions.
+# 5. Current-state resolution (D-209) + status-key resolve gate.
+#    D-209 SUPERSEDES the D-208/D-125 deduct row filter:
+#      * keep ALL reservation statuses - deduct no longer removes rows
+#      * keep the resolve gate - every input status key MUST match a
+#        D_ReservationStatus row (unmatched = hard stop, never a silent drop)
+#      * keep the deduct join only as a diagnostic column (visibility)
+#      * resolve current state at BUILD, per RESERVATION: keep each
+#        reservation's latest version (MAX(SnapshotDateTime) per ReservationID)
+#
+#    Variable names df_pass / n_pass / df_excluded / n_excluded are RETAINED so
+#    sections 6 and 7 need no edit, but their meaning changes:
+#      df_pass / n_pass          = current-state rows (enter the fact)
+#      df_excluded / n_excluded  = superseded older-version rows (dropped)
 # ---------------------------------------------------------------
+from pyspark.sql.window import Window
+
 df_drs = (spark.read.table(TBL_D_RESERVATIONSTATUS)
           .select("ReservationStatusKey",
                   F.col("InventoryDeduct").cast("boolean").alias("_InventoryDeduct")))
 
-# Gate: dimension side must be unique + fully populated on the filter columns.
+# Gate: dimension side must be unique + fully populated on the join columns.
 n_dup_key = df_drs.groupBy("ReservationStatusKey").count().filter("count > 1").count()
 if n_dup_key:
-    raise RuntimeError("Duplicate ReservationStatusKey in D_ReservationStatus — "
-                       "deduct join would be ambiguous.")
+    raise RuntimeError("Duplicate ReservationStatusKey in D_ReservationStatus - "
+                       "status join would be ambiguous.")
 n_null_flag = df_drs.filter(F.col("_InventoryDeduct").isNull()).count()
 if n_null_flag:
     raise RuntimeError(f"{n_null_flag} D_ReservationStatus rows have NULL/unreadable "
-                       "InventoryDeduct — governance does not permit guessing this flag.")
+                       "InventoryDeduct - governance does not permit guessing this flag.")
 
 # Gate: every input status key must resolve (left_anti finds the unmatched ones).
 df_unmatched = (df_in.select("ReservationStatusKey").distinct()
@@ -303,31 +315,55 @@ unmatched = [r["ReservationStatusKey"] for r in df_unmatched.collect()]
 if unmatched:
     raise RuntimeError(f"Status key(s) {unmatched} in I_RoomNights have no "
                        f"D_ReservationStatus row. Unresolvable keys must not be "
-                       f"silently dropped — fix the seed/dimension first.")
+                       f"silently dropped - fix the seed/dimension first.")
 print("All input ReservationStatusKey values resolve in D_ReservationStatus.")
 
+# Guard: current-state resolution needs a usable SnapshotDateTime on every row.
+n_null_snap = df_in.filter(F.col("SnapshotDateTime").isNull()).count()
+if n_null_snap:
+    raise RuntimeError(f"{n_null_snap} I_RoomNights rows have NULL SnapshotDateTime - "
+                       "current-state resolution (D-209) cannot rank them. "
+                       "Fix I_RoomNights first.")
+
+# Attach the deduct flag for diagnostics only (D-209: it does NOT filter rows).
 df_joined = df_in.join(df_drs, "ReservationStatusKey", "inner")
 
-df_pass     = df_joined.filter(F.col("_InventoryDeduct"))
-df_excluded = df_joined.filter(~F.col("_InventoryDeduct"))
+# --- Current-state resolution at RESERVATION grain (D-209) ---
+# Partition by ReservationID so MAX(SnapshotDateTime) spans every night of every
+# version of the reservation; keeping rows equal to that max keeps the whole latest
+# version and drops every superseded version, including nights a later (shortened or
+# moved) version no longer contains. Filtering on IsLatestCurrent instead would leave
+# those nights behind, because that flag is defined per room-night key, not per version.
+w_res = Window.partitionBy("ReservationID")
+df_tagged   = df_joined.withColumn("_MaxSnap", F.max("SnapshotDateTime").over(w_res))
+df_pass     = df_tagged.filter(F.col("SnapshotDateTime") == F.col("_MaxSnap")).drop("_MaxSnap")
+df_excluded = df_tagged.filter(F.col("SnapshotDateTime") != F.col("_MaxSnap")).drop("_MaxSnap")
 
-n_pass     = df_pass.count()
-n_excluded = df_excluded.count()
-print(f"Rows passing deduct filter (enter F_RoomNights): {n_pass}")
-print(f"Rows excluded (non-deducting status):            {n_excluded}")
+n_pass     = df_pass.count()       # current-state rows (enter the fact)
+n_excluded = df_excluded.count()   # superseded older-version rows (dropped)
+
+# Accounting: every input row is either current or superseded - nothing vanishes.
 if n_pass + n_excluded != n_in_rows:
-    raise RuntimeError("Filter accounting broken: pass + excluded != input. Stop.")
+    raise RuntimeError("Row accounting broken: current + superseded != input. Stop.")
 
-print("Excluded rows by status (visibility only — governed behaviour, not an error):")
-df_excluded.groupBy("ReservationStatusKey").count().orderBy("ReservationStatusKey") \
-    .show(truncate=False)
+# Diagnostic deduct split on the CURRENT set (visibility only - deduct no longer filters).
+n_ded_true    = df_pass.filter(F.col("_InventoryDeduct")).count()
+n_ded_false   = df_pass.filter(~F.col("_InventoryDeduct")).count()
+n_res_current = df_pass.select("ReservationID").distinct().count()
+n_res_ded_t   = df_pass.filter(F.col("_InventoryDeduct")).select("ReservationID").distinct().count()
+
+print(f"Input rows (all versions, all statuses):          {n_in_rows}")
+print(f"Current-state rows entering fact (D-209):          {n_pass}")
+print(f"Superseded older-version rows dropped:             {n_excluded}")
+print(f"  current, InventoryDeduct = TRUE:   {n_ded_true}  ({n_res_ded_t} reservations)")
+print(f"  current, InventoryDeduct = FALSE:  {n_ded_false}")
+print(f"Distinct reservations in current-state fact:       {n_res_current}")
 
 if n_pass == 0:
     raise RuntimeError(
-        "0 rows pass the deduct filter — the fact would be empty and the D_Date "
-        "coverage rule (D-208) cannot be evaluated. This is unexpected for the OSL "
-        "slice; investigate the D_ReservationStatus seed before continuing.")
-
+        "0 current-state rows - the fact would be empty and the D_Date coverage rule "
+        "(D-208) cannot be evaluated. Unexpected for the OSL slice; investigate "
+        "I_RoomNights before continuing.")
 
 # METADATA ********************
 
@@ -359,13 +395,10 @@ if n_pass == 0:
 # explicitly overrides `NullableFlag = No` for these columns for this slice.** The not-null
 # contract applies when they are actually built later.
 # 
-# **One nuance worth understanding — `IsLatestCurrent`:** the flag is **carried as-is** from
-# `I_RoomNights` (C-226). Because the deduct filter removes non-deducting versions, a
-# room-night whose *newest* snapshot is, say, Canceled will have **no** `IsLatestCurrent = TRUE`
-# row inside `F_RoomNights` — its TRUE row was filtered out. That is correct governed
-# behaviour, not a bug: it means "this room-night no longer deducts inventory in its current
-# state". Current-state analysis is resolved later in measures via `MAX(SnapshotDateTime)`
-# (C-203). This notebook must not recompute the flag — that would be invented logic.
+# **One nuance - `IsLatestCurrent`:** carried as-is from `I_RoomNights` (C-226). Under D-209 the
+# fact already holds only each reservation's latest version, so current state is resolved **at
+# build, per reservation**, not later in measures. The flag is not recomputed here - that would
+# be invented logic.
 # 
 # The physical column order below follows the `03_Columns` listing order.
 
@@ -433,7 +466,6 @@ if n_fact != n_pass:
     raise RuntimeError("Row count changed during projection — must be one fact row per "
                        "qualifying I_RoomNights row (D-208).")
 
-
 # METADATA ********************
 
 # META {
@@ -460,7 +492,6 @@ if n_fact != n_pass:
     .option("overwriteSchema", "true")
     .saveAsTable(TARGET_FACT))
 print(f"Wrote {TARGET_FACT} ({WRITE_MODE}): {n_fact} rows, 33 columns.")
-
 
 # METADATA ********************
 
@@ -524,7 +555,6 @@ if max_stay > end_d:
 horizon_days = (end_d - max_stay).days
 print(f"Coverage OK. Forward horizon beyond latest StayDate: {horizon_days} days.")
 
-
 # METADATA ********************
 
 # META {
@@ -577,7 +607,6 @@ if len(df_date.columns) != 7:
     .saveAsTable(TARGET_DATE))
 print(f"Wrote {TARGET_DATE} ({WRITE_MODE}): {n_dates} rows, 7 columns.")
 
-
 # METADATA ********************
 
 # META {
@@ -594,14 +623,13 @@ print(f"Wrote {TARGET_DATE} ({WRITE_MODE}): {n_dates} rows, 7 columns.")
 # 
 # **Fact checks:**
 # 
-# 1. **Row funnel** — input versions = fact rows + excluded rows; every deduct-TRUE input row
-#    is in the fact; no non-deduct row leaked in.
+# 1. **Row funnel** - input versions = current-state rows + superseded rows; no row vanishes.
 # 2. **Identity** — `RoomNightID` unique in the fact and identical to `I_RoomNights` (C-198):
 #    every fact key exists upstream, one-to-one.
 # 3. **Column contract** — exactly 33 columns; the 16 ungoverned columns 100% NULL; the 17
 #    carried columns 0% NULL.
-# 4. **Deduct proof** — joining the written fact back to `D_ReservationStatus` shows
-#    `InventoryDeduct = TRUE` on every row.
+# 4. **Deduct split** - joining the written fact back to `D_ReservationStatus` shows the
+#    `InventoryDeduct` TRUE/FALSE counts (visibility). Under D-209, FALSE rows are expected.
 # 5. **Carry integrity** — `IsDayUse` consistency; `IsLatestCurrent` equals the upstream value
 #    per `RoomNightID`; at most one TRUE per `ReservationID + StayDate` group (the slice has
 #    `BookedRoomIndex = 1` everywhere, so this grouping equals the governed room-night group).
@@ -648,7 +676,6 @@ n_missing = t_in_deduct.select("RoomNightID").join(
     t_fact.select("RoomNightID"), "RoomNightID", "left_anti").count()
 print(f"Deduct-TRUE upstream rows missing from fact: {n_missing} -> "
       f"{'OK' if n_missing == 0 else 'FAIL'}")
-
 
 # METADATA ********************
 
@@ -697,7 +724,6 @@ for c in CARRIED_NOT_NULL_COLS:
         print(f"  {c}: {n_null} NULL values -> FAIL (governed not-null)")
 print(f"0% NULL on all 17 carried columns -> {'OK' if all_ok else 'FAIL'}")
 
-
 # METADATA ********************
 
 # META {
@@ -710,11 +736,14 @@ print(f"0% NULL on all 17 carried columns -> {'OK' if all_ok else 'FAIL'}")
 # ---------------------------------------------------------------
 # 9c. Fact — deduct proof + carry integrity.
 # ---------------------------------------------------------------
-# Deduct proof on the WRITTEN table.
-n_bad_deduct = (t_fact.join(df_drs_chk, "ReservationStatusKey", "left")
-                      .filter((F.col("_ded").isNull()) | (~F.col("_ded"))).count())
-print(f"Fact rows whose status is not InventoryDeduct=TRUE: {n_bad_deduct} -> "
-      f"{'OK' if n_bad_deduct == 0 else 'FAIL'}")
+# Deduct split on the WRITTEN table (D-209: all statuses retained; deduct is diagnostic, not a filter).
+t_fact_ded    = t_fact.join(df_drs_chk, "ReservationStatusKey", "left")
+n_ded_true_w  = t_fact_ded.filter(F.col("_ded") == True).count()
+n_ded_false_w = t_fact_ded.filter((F.col("_ded").isNull()) | (~F.col("_ded"))).count()
+print(f"Fact rows InventoryDeduct=TRUE:  {n_ded_true_w}")
+print(f"Fact rows InventoryDeduct=FALSE: {n_ded_false_w}")
+print(f"Deduct split covers all fact rows: "
+      f"{'OK' if n_ded_true_w + n_ded_false_w == n_written else 'FAIL'}")
 
 # IsDayUse consistency (carried, must still hold).
 n_bad_du = t_fact.filter(
@@ -744,7 +773,6 @@ t_fact.filter("IsLatestCurrent").groupBy("IsDayUse").count().show(truncate=False
 print("Fact rows by status (visibility):")
 t_fact.groupBy("ReservationStatusKey").count().orderBy("ReservationStatusKey") \
     .show(truncate=False)
-
 
 # METADATA ********************
 
@@ -802,7 +830,6 @@ print(f"Fact StayDates without a D_Date row: {n_uncovered} -> "
 if n_uncovered:
     raise RuntimeError("Coverage guarantee violated (D-208) — widen the D_Date range "
                        "in Section 1 and re-run. Do not use these tables downstream.")
-
 
 # METADATA ********************
 

@@ -2,8 +2,59 @@ table f_roomnights
 	lineageTag: e8e6dd3c-0a40-4301-bdb2-3f3656f859e4
 	sourceLineageTag: [dbo].[f_roomnights]
 
+	/// Count of room-night rows in f_roomnights. Grain verified as one row per reservation per stay date. Currently includes day-use rows; inclusion policy for the headline metric is not yet governed.
+	measure 'Room Nights' = COUNTROWS ( f_roomnights )
+		formatString: #,##0
+		displayFolder: 01 Volume
+		lineageTag: 98cea3e5-536a-4aee-9698-04eb57be3961
+
+	/// Distinct reservations present in the current filter context. A multi-night stay counts once.
+	measure Reservations = DISTINCTCOUNT ( f_roomnights[ReservationID] )
+		formatString: #,##0
+		displayFolder: 01 Volume
+		lineageTag: 8d363ce5-0a57-4760-bb03-c4a51a0cc568
+
+	/// Room nights excluding day-use rows. Day-use handling governed under D-206.
+	measure 'Overnight Room Nights' = CALCULATE ( [Room Nights], f_roomnights[IsDayUse] = FALSE () )
+		formatString: #,##0
+		displayFolder: 01 Volume
+		lineageTag: 67ab5200-6a29-4e5e-8b6a-0b39d7c9d57e
+
+	/// Room nights flagged as day-use (same-day arrival and departure, LOS_Nights = 0). Day-use handling governed under D-206.
+	measure 'Day Use Room Nights' = CALCULATE ( [Room Nights], f_roomnights[IsDayUse] = TRUE () )
+		formatString: #,##0
+		displayFolder: 01 Volume
+		lineageTag: 492379ec-f8ff-4009-9fba-360a6486c262
+
+	/// Average LOS_Nights evaluated once per reservation, not per room-night row. Currently includes day-use reservations (LOS = 0), which lowers the result.
+	measure 'Average Length of Stay' =
+			AVERAGEX (
+			    VALUES ( f_roomnights[ReservationID] ),
+			    CALCULATE ( MAX ( f_roomnights[LOS_Nights] ) )
+			)
+		formatString: #,##0.00
+		displayFolder: 02 Stay Behaviour
+		lineageTag: 54518a53-0f4d-446a-b418-70df9f9014a5
+
+	/// Average BookingWindowDays evaluated once per reservation. Source data contains negative values (minimum -1), meaning booking after arrival.
+	measure 'Average Booking Window (Days)' =
+			AVERAGEX (
+			    VALUES ( f_roomnights[ReservationID] ),
+			    CALCULATE ( MAX ( f_roomnights[BookingWindowDays] ) )
+			)
+		formatString: #,##0.0
+		displayFolder: 02 Stay Behaviour
+		lineageTag: 379e80fd-d3f0-45d7-b4b0-7d33c9668f80
+
+	/// Reconciliation check. Should equal [Room Nights] because F_RoomNights is pre-filtered to inventory-deducting statuses at build time under D-208. Divergence indicates the build filter has changed.
+	measure 'Inventory Deducting Room Nights' = CALCULATE ( [Room Nights], d_reservationstatus[InventoryDeduct] = TRUE () )
+		formatString: #,##0
+		displayFolder: 99 Diagnostics
+		lineageTag: e835d085-d07b-4d8b-bded-9f3be6dfaa3e
+
 	column RoomNightID
 		dataType: string
+		isHidden
 		lineageTag: c6203c7c-ecaf-4ba3-92dd-7e04d5314851
 		sourceLineageTag: RoomNightID
 		summarizeBy: none
@@ -22,6 +73,7 @@ table f_roomnights
 
 	column PropertyKey
 		dataType: string
+		isHidden
 		lineageTag: a36395c1-199f-46fd-820e-0ced884b6cbc
 		sourceLineageTag: PropertyKey
 		summarizeBy: none
@@ -31,6 +83,7 @@ table f_roomnights
 
 	column PropertyID
 		dataType: string
+		isHidden
 		lineageTag: 5202d825-b100-45ac-a6c8-f1ee787e4b1d
 		sourceLineageTag: PropertyID
 		summarizeBy: none
@@ -50,6 +103,7 @@ table f_roomnights
 
 	column SnapshotDateTime
 		dataType: dateTime
+		isHidden
 		formatString: General Date
 		lineageTag: 6b4d325d-3fec-4cb6-babd-9d5afb06274d
 		sourceLineageTag: SnapshotDateTime
@@ -60,6 +114,7 @@ table f_roomnights
 
 	column RoomTypeKey
 		dataType: string
+		isHidden
 		lineageTag: 89c9e4b2-a036-4074-b513-17f344607665
 		sourceLineageTag: RoomTypeKey
 		summarizeBy: none
@@ -69,6 +124,7 @@ table f_roomnights
 
 	column RatePlanKey
 		dataType: string
+		isHidden
 		lineageTag: aea19927-c8f6-4431-9bea-067167208ed8
 		sourceLineageTag: RatePlanKey
 		summarizeBy: none
@@ -78,6 +134,7 @@ table f_roomnights
 
 	column ChannelKey
 		dataType: string
+		isHidden
 		lineageTag: 584da353-0d32-409c-83d0-a32a690c5c5e
 		sourceLineageTag: ChannelKey
 		summarizeBy: none
@@ -87,6 +144,7 @@ table f_roomnights
 
 	column SegmentKey
 		dataType: string
+		isHidden
 		lineageTag: 9c14b543-c188-4172-9166-f9dc7a45b56d
 		sourceLineageTag: SegmentKey
 		summarizeBy: none
@@ -96,6 +154,7 @@ table f_roomnights
 
 	column ReservationStatusKey
 		dataType: string
+		isHidden
 		lineageTag: 36bc9b4e-42a4-41ec-9790-3571b15af629
 		sourceLineageTag: ReservationStatusKey
 		summarizeBy: none
@@ -105,6 +164,7 @@ table f_roomnights
 
 	column MarketCountryKey
 		dataType: string
+		isHidden
 		lineageTag: 5f5791ae-ff14-4104-ac6d-4f6f54a61c91
 		sourceLineageTag: MarketCountryKey
 		summarizeBy: none
@@ -114,6 +174,7 @@ table f_roomnights
 
 	column BlockID
 		dataType: string
+		isHidden
 		lineageTag: 3046dfa8-e05c-495b-923e-7810163dfc18
 		sourceLineageTag: BlockID
 		summarizeBy: none
@@ -123,6 +184,7 @@ table f_roomnights
 
 	column EventID
 		dataType: string
+		isHidden
 		lineageTag: c081ff9d-7a88-4b27-a387-7bd029c1e318
 		sourceLineageTag: EventID
 		summarizeBy: none
@@ -175,7 +237,7 @@ table f_roomnights
 		formatString: 0
 		lineageTag: fcca68f6-a30e-4f85-a2a7-bf4778f4b512
 		sourceLineageTag: LOS_Nights
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: LOS_Nights
 
 		annotation SummarizationSetBy = Automatic
@@ -185,13 +247,14 @@ table f_roomnights
 		formatString: 0
 		lineageTag: 69de9664-acf5-419a-837e-356765ff1439
 		sourceLineageTag: BookingWindowDays
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: BookingWindowDays
 
 		annotation SummarizationSetBy = Automatic
 
 	column CurrencyCode
 		dataType: string
+		isHidden
 		lineageTag: 65532353-0b6a-4e9e-83d9-e4cdb42b8ac6
 		sourceLineageTag: CurrencyCode
 		summarizeBy: none
@@ -201,6 +264,7 @@ table f_roomnights
 
 	column BookedRoomRevenue_RoomNight
 		dataType: double
+		isHidden
 		lineageTag: 4d1d618a-7f75-418f-be55-21b78474c88b
 		sourceLineageTag: BookedRoomRevenue_RoomNight
 		summarizeBy: sum
@@ -212,6 +276,7 @@ table f_roomnights
 
 	column RealizedRoomRevenue_RoomNight
 		dataType: double
+		isHidden
 		lineageTag: e0d1886e-d1eb-400d-9a44-533a5087ab12
 		sourceLineageTag: RealizedRoomRevenue_RoomNight
 		summarizeBy: sum
@@ -223,6 +288,7 @@ table f_roomnights
 
 	column RoomRevenue
 		dataType: double
+		isHidden
 		lineageTag: 07ea86b7-5374-414a-9b2d-0e1d8fc83907
 		sourceLineageTag: RoomRevenue
 		summarizeBy: sum
@@ -234,6 +300,7 @@ table f_roomnights
 
 	column RevenueState
 		dataType: string
+		isHidden
 		lineageTag: 3f9cbe16-71f2-463e-bdd1-76540bbea550
 		sourceLineageTag: RevenueState
 		summarizeBy: none
@@ -243,6 +310,7 @@ table f_roomnights
 
 	column BookedRevenueDerivationMethod
 		dataType: string
+		isHidden
 		lineageTag: decae884-d1e3-42ac-a686-274955957e03
 		sourceLineageTag: BookedRevenueDerivationMethod
 		summarizeBy: none
@@ -252,6 +320,7 @@ table f_roomnights
 
 	column RealizedRevenueDerivationMethod
 		dataType: string
+		isHidden
 		lineageTag: 056f5704-3fe1-4888-97b2-6a6726f365cd
 		sourceLineageTag: RealizedRevenueDerivationMethod
 		summarizeBy: none
@@ -261,6 +330,7 @@ table f_roomnights
 
 	column IsBlockPickupRoomNight
 		dataType: boolean
+		isHidden
 		formatString: """TRUE"";""TRUE"";""FALSE"""
 		lineageTag: c4a283c8-11f4-470d-a4ba-fa975974f7d2
 		sourceLineageTag: IsBlockPickupRoomNight
@@ -271,6 +341,7 @@ table f_roomnights
 
 	column IsLatestCurrent
 		dataType: boolean
+		isHidden
 		formatString: """TRUE"";""TRUE"";""FALSE"""
 		lineageTag: 9daccbaa-a3c4-4e0f-a369-fa8b52752e8a
 		sourceLineageTag: IsLatestCurrent
@@ -281,6 +352,7 @@ table f_roomnights
 
 	column RevenueStreamKey
 		dataType: string
+		isHidden
 		lineageTag: c916bee2-51d2-4657-bb42-39583de5808a
 		sourceLineageTag: RevenueStreamKey
 		summarizeBy: none
@@ -290,6 +362,7 @@ table f_roomnights
 
 	column TenantKey
 		dataType: string
+		isHidden
 		lineageTag: e4333c1f-5461-4402-8a0b-56de40b0637b
 		sourceLineageTag: TenantKey
 		summarizeBy: none
@@ -299,6 +372,7 @@ table f_roomnights
 
 	column TenantID
 		dataType: string
+		isHidden
 		lineageTag: de6aa0d4-7582-46e6-bd18-c9f36caaa66a
 		sourceLineageTag: TenantID
 		summarizeBy: none

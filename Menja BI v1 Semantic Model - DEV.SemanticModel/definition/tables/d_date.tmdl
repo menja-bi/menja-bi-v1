@@ -1,9 +1,11 @@
 table d_date
 	lineageTag: 520b2081-2ec2-4e53-b027-a3a58b6c9968
 	sourceLineageTag: [dbo].[d_date]
+	dataCategory: Time
 
 	column DateKey
 		dataType: int64
+		isHidden
 		formatString: 0
 		lineageTag: 60eff40f-b912-4f1f-a8eb-51f6651e049d
 		sourceLineageTag: DateKey
@@ -14,6 +16,7 @@ table d_date
 
 	column Date
 		dataType: dateTime
+		isUnique
 		formatString: General Date
 		lineageTag: 0480b20c-469c-4c00-9c53-6661adf3e6e0
 		sourceLineageTag: Date
@@ -27,7 +30,7 @@ table d_date
 		formatString: 0
 		lineageTag: e2ece2a3-b321-4313-86d5-bd0b1d91c6df
 		sourceLineageTag: Year
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: Year
 
 		annotation SummarizationSetBy = Automatic
@@ -37,7 +40,7 @@ table d_date
 		formatString: 0
 		lineageTag: 7e69ad1b-a13a-44de-95a1-1d4a8c7cf93c
 		sourceLineageTag: MonthNumber
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: MonthNumber
 
 		annotation SummarizationSetBy = Automatic
@@ -48,6 +51,7 @@ table d_date
 		sourceLineageTag: MonthName
 		summarizeBy: none
 		sourceColumn: MonthName
+		sortByColumn: MonthNumber
 
 		annotation SummarizationSetBy = Automatic
 
@@ -56,7 +60,7 @@ table d_date
 		formatString: 0
 		lineageTag: 93e6ad80-abaf-48f0-8772-36207b9725f9
 		sourceLineageTag: WeekdayNumber
-		summarizeBy: sum
+		summarizeBy: none
 		sourceColumn: WeekdayNumber
 
 		annotation SummarizationSetBy = Automatic
@@ -67,6 +71,7 @@ table d_date
 		sourceLineageTag: WeekdayName
 		summarizeBy: none
 		sourceColumn: WeekdayName
+		sortByColumn: WeekdayNumber
 
 		annotation SummarizationSetBy = Automatic
 

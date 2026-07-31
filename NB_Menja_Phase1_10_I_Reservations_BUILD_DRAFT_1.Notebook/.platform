@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "Notebook",
-    "displayName": "NB_Menja_Phase1_10_I_Reservations_BUILD_DRAFT",
+    "displayName": "NB_Menja_Phase1_10_I_Reservations_BUILD_DRAFT_1",
     "description": "New notebook"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "90324a8d-05e7-a6cf-4083-9d9772957a81"
+    "logicalId": "f431353a-7353-84c6-42e8-4c99bdb54a21"
   }
 }

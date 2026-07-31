@@ -39,7 +39,11 @@
 # - D-191 — `StatusDateTime` per status, with an EXACT / OBSERVED basis marker.
 # - D-192 — identity columns: `ReservationID`, `PMSReservationID`, `BookingDateTime`.
 # - D-193 — arrival/departure dates: convert UTC to the property's local time zone FIRST, then take the date.
-# - D-195 + D-205 — property found via: reservation → service → enterprise → `D_Property.PMS_PropertyCode`.
+# - D-195 + D-223–D-234 (F-5) — property found via: reservation → service → `EnterpriseId`
+#   (= governed `SourcePropertyCode`) → matched against `B_PropertySourceIdentity` on
+#   `PMS + SourceType + SourcePropertyCode` → `PropertyKey`. The old direct
+#   `D_Property.PMS_PropertyCode` lookup is no longer part of this path (Physical
+#   Governance Package A; D-235 makes `I_Reservations.PropertyID` nullable/unpopulated).
 # - D-198 — seed workbook read with an explicit sheet allow-list; `_` sheets ignored.
 # - D-199 — one row = one booked room/space unit; `BookedRooms = 1`.
 # - D-200 — `IsGroupReservation = FALSE` (safe interim rule).
@@ -72,7 +76,6 @@
 # The last cell here just checks that the notebook is attached to the right lakehouse.
 # If it is not, stop and attach `LH_Menja_BI_v1_Mews_DEV` before running anything else.
 
-
 # CELL ********************
 
 # ---------------------------------------------------------------
@@ -82,9 +85,22 @@
 # --- source system constant (D-122 / BND-RES-032) ---
 SOURCE_SYSTEM = "MEWS"
 
+# --- source type for THIS notebook run (F-5, D-223-D-234) ---
+# Mews reservation/service records never carry a SourceType - it is an extraction-
+# config concept, not PMS data. ExtractionRunLog.SourceType is also NULL for every
+# run behind this raw data (the column was added later, with no backfill - see the
+# working context). So SourceType cannot be read per-row or read from the run log
+# for this data; it is one confirmed value for the whole run, exactly like
+# SOURCE_SYSTEM above. CONFIRM against B_PropertySourceIdentity (Section 8 prints
+# what it loaded) before trusting a run.
+SOURCE_TYPE = "DEMO"   # <-- CONFIRM
+
 # --- extraction log tables (D-186) ---
 RUN_LOG_TABLE  = "ExtractionRunLog"
 FILE_LOG_TABLE = "ExtractionFileLog"
+
+# --- governed property identity table (D-223-D-234, F-2, physically built) ---
+PROPERTY_IDENTITY_TABLE = "B_PropertySourceIdentity"
 
 # --- endpoint names as they appear in ExtractionRunLog.Endpoint ---
 # CONFIRM against the discovery cell in Section 2 before running Section 3.
@@ -113,11 +129,13 @@ STATUS_SEED_PMS_STATE_COL = "PMSStatusCode"   # <-- CONFIRM column name in seed 
 # --- governed UNKNOWN status member key (D-190) ---
 STATUS_UNKNOWN_KEY = "UNKNOWN"                # <-- CONFIRM key value in seed sheet
 
-# --- tenant mapping (D-177): property -> tenant manual input ---
+# --- tenant mapping (D-177 + D-235): property -> tenant manual input ---
 # The binding references the T_MI_Property manual input. Where that mapping
 # lives inside the current seed workbook must be CONFIRMED by you.
+# D-235 (FINAL): TenantKey/TenantID resolve through PropertyKey, not PropertyID -
+# PropertyID is nullable/unpopulated (C-283) and must never be a resolution key.
 TENANT_SEED_SHEET      = "D_Property"         # <-- CONFIRM sheet name
-TENANT_PROPERTY_COL    = "PropertyID"         # <-- CONFIRM join column
+TENANT_PROPERTY_COL    = "PropertyKey"        # <-- CONFIRM join column (D-235)
 TENANT_KEY_COL         = "TenantKey"          # <-- CONFIRM
 TENANT_ID_COL          = "TenantID"           # <-- CONFIRM
 
@@ -129,7 +147,6 @@ QUARANTINE_TABLE = "I_Reservations_DQ_Quarantine"   # naming is implementation d
 # Initial full build: rebuild from retained raw (allowed by D-148/D-151 retention).
 # Incremental change-aware appends (D-188 trigger comparison) are a LATER section, not this draft.
 WRITE_MODE = "overwrite"
-
 
 # METADATA ********************
 
@@ -155,7 +172,6 @@ if not os.path.isdir(LAKEHOUSE_FILES_ROOT):
 
 print("Default lakehouse Files area is reachable:", LAKEHOUSE_FILES_ROOT)
 
-
 # METADATA ********************
 
 # META {
@@ -177,7 +193,6 @@ print("Default lakehouse Files area is reachable:", LAKEHOUSE_FILES_ROOT)
 # `*_ENDPOINT` parameter values in Section 1 match the real `Endpoint` strings.
 # Nothing is transformed here.
 
-
 # CELL ********************
 
 # ---------------------------------------------------------------
@@ -194,7 +209,6 @@ print("Distinct Endpoint / Status combinations in ExtractionRunLog:")
       F.max("RunEndUtc").alias("LatestRunEndUtc"))
  .orderBy("Endpoint", "Status")
  .show(50, truncate=False))
-
 
 # METADATA ********************
 
@@ -218,7 +232,6 @@ print("Distinct Endpoint / Status combinations in ExtractionRunLog:")
 # 
 # If any endpoint has no successful run, the cell stops with a clear message instead of
 # continuing with missing inputs.
-
 
 # CELL ********************
 
@@ -258,7 +271,6 @@ print(f"Age-category raw files (latest run):         {len(agecat_files)}")
 for p in (reservation_files + service_files + agecat_files):
     print("  ", p)
 
-
 # METADATA ********************
 
 # META {
@@ -292,7 +304,6 @@ if missing:
 
 print("All logged raw files exist on disk. OK.")
 
-
 # METADATA ********************
 
 # META {
@@ -312,7 +323,6 @@ print("All logged raw files exist on disk. OK.")
 # No filtering, no renaming, no business logic here — parse only.
 # The validation prints show the raw row counts so you can compare them
 # with the `RecordCount` values you verified in the logs (services 495, age categories 333).
-
 
 # CELL ********************
 
@@ -357,7 +367,6 @@ print("\nReservation raw schema (top level):")
 for f in df_res_raw.schema.fields:
     print("  ", f.name, "-", f.dataType.simpleString()[:60])
 
-
 # METADATA ********************
 
 # META {
@@ -378,11 +387,12 @@ for f in df_res_raw.schema.fields:
 # - Any sheet starting with `_` is documentation and is never imported.
 # - Seed content is runtime input, **not** governance authority.
 # 
-# After loading, a **readiness gate** checks the D-203 hard prerequisite:
-# every `D_Property` seed row must have `PMS_PropertyCode` (the Mews EnterpriseId)
-# and `TimeZone` filled. If not, the notebook stops — because arrival/departure
-# dates and the property lookup are not allowed to run without them.
-
+# After loading, a **readiness gate** checks the D-203 hard prerequisite: every
+# `D_Property` seed row must have `PropertyKey` and `TimeZone` filled. If not, the
+# notebook stops — arrival/departure date conversion (Section 9) is not allowed to
+# run without a time zone. (F-5: `PMS_PropertyCode` is no longer part of this gate —
+# property resolution itself now runs entirely through `B_PropertySourceIdentity`,
+# Section 8.)
 
 # CELL ********************
 
@@ -409,7 +419,6 @@ for sheet in SEED_SHEETS_NEEDED:
     seed[sheet] = pdf
     print(f"Loaded seed sheet '{sheet}': {len(pdf)} rows, columns: {list(pdf.columns)}")
 
-
 # METADATA ********************
 
 # META {
@@ -422,34 +431,39 @@ for sheet in SEED_SHEETS_NEEDED:
 # ---------------------------------------------------------------
 # 5b. D_Property seed readiness gate (hard prerequisite in D-203).
 # ---------------------------------------------------------------
+# F-5: PropertyID and PMS_PropertyCode are dropped from this gate. PropertyID is
+# nullable/unpopulated (D-235/C-283) and is never used here. PMS_PropertyCode may
+# still exist as a plain D_Property dimension attribute (NB25's concern, not this
+# notebook's) but must not be required, checked, or used for resolution here
+# (Physical Governance Package A). D_Property is only used below for TimeZone
+# (D-193) and, in Section 13, the tenant mapping via PropertyKey (D-235).
 prop_pdf = seed["D_Property"]
 
-required_prop_cols = ["PropertyKey", "PropertyID", "PMS_PropertyCode", "TimeZone"]
+required_prop_cols = ["PropertyKey", "TimeZone"]
 missing_cols = [c for c in required_prop_cols if c not in prop_pdf.columns]
 if missing_cols:
     raise RuntimeError(
         f"D_Property seed is missing required columns {missing_cols}. "
-        "D-203 blocks Phase-1 until the seed carries PMS_PropertyCode and TimeZone."
+        "D-203 blocks Phase-1 until the seed carries TimeZone for every property."
     )
 
 blank = prop_pdf[required_prop_cols].isna().any(axis=1)
 if blank.any():
     raise RuntimeError(
         "D_Property seed readiness FAILED — rows with blank "
-        "PropertyKey / PropertyID / PMS_PropertyCode / TimeZone:\n"
+        "PropertyKey / TimeZone:\n"
         + prop_pdf[blank].to_string()
     )
 
-dup = prop_pdf["PMS_PropertyCode"].duplicated()
+dup = prop_pdf["PropertyKey"].duplicated()
 if dup.any():
-    raise RuntimeError("Duplicate PMS_PropertyCode values in D_Property seed — "
-                       "property lookup would be ambiguous:\n"
+    raise RuntimeError("Duplicate PropertyKey values in D_Property seed — "
+                       "the TimeZone/tenant lookup would be ambiguous:\n"
                        + prop_pdf[dup].to_string())
 
 df_seed_property = spark.createDataFrame(prop_pdf[required_prop_cols])
 print("D_Property seed readiness OK:", prop_pdf.shape[0], "properties.")
 df_seed_property.show(truncate=False)
-
 
 # METADATA ********************
 
@@ -491,7 +505,6 @@ df_seed_status = spark.createDataFrame(
 print("D_ReservationStatus seed OK.")
 df_seed_status.show(truncate=False)
 
-
 # METADATA ********************
 
 # META {
@@ -519,7 +532,6 @@ df_seed_status.show(truncate=False)
 # 
 # We also keep a few raw helper fields (`ServiceId`, timestamps, `PersonCounts`) that later
 # sections need. Helper fields never end up in the final table.
-
 
 # CELL ********************
 
@@ -558,7 +570,6 @@ for c in ["ReservationID", "SnapshotDateTime", "PMSStatusCode"]:
                            "cannot build the governed grain. Inspect raw before continuing.")
 print("Identity null checks OK.")
 
-
 # METADATA ********************
 
 # META {
@@ -583,7 +594,6 @@ print("Identity null checks OK.")
 # Note on scope: comparing an *incoming* row against an *already stored* version using the
 # D-188 trigger-field list is incremental-load logic. This BUILD_DRAFT is an initial full
 # build into an empty table, so that comparison is deliberately left to a later section.
-
 
 # CELL ********************
 
@@ -619,7 +629,6 @@ if n_collisions > 0:
                                df_collisions.select(*grain, "PMSReservationID")))
     df_collisions.select(*grain, "PMSStatusCode", "PMSReservationID").show(20, truncate=False)
 
-
 # METADATA ********************
 
 # META {
@@ -629,55 +638,143 @@ if n_collisions > 0:
 
 # MARKDOWN ********************
 
-# ## 8. Property resolution (D-195 + D-205)
+# ## 8. Property resolution (F-5 — D-195, D-223–D-234, BND-RES-003)
 # 
 # **Plain words:** Mews reservations do not say which hotel they belong to. The governed path is:
 # 
 # `reservation.ServiceId` → find that service in the services file → read the service's
-# `EnterpriseId` (Mews's word for the hotel) → match it to `PMS_PropertyCode` in the
-# `D_Property` seed → take that row's `PropertyKey` and the governed `PropertyID`.
+# `EnterpriseId` (Mews's word for the hotel — this **is** the governed `SourcePropertyCode`,
+# it is not being renamed or replaced) → match `PMS + SourceType + SourcePropertyCode`
+# against exactly one row in `B_PropertySourceIdentity` → take that row's `PropertyKey`.
+# 
+# `B_PropertySourceIdentity` is a physical governed table (built by
+# `NB_Menja_ExtractionControl_Setup`), read here the same way as `ExtractionRunLog` —
+# **not** re-read from the seed workbook.
+# 
+# **Grain decision — SourceType applies at run level, not row level (see Section 1):**
+# Mews never sends a SourceType on a reservation or service record, and
+# `ExtractionRunLog.SourceType` is NULL for every run behind this raw data (added later,
+# no backfill). There is nothing to key a per-row lookup on. `SOURCE_TYPE` is therefore
+# one confirmed value for the whole run — the same pattern as `SOURCE_SYSTEM` — not
+# inferred, not guessed, not varied row by row.
 # 
 # Rules applied literally:
 # - The services **latest snapshot** is used (services are slow-changing configuration).
-# - A reservation whose link breaks anywhere (unknown ServiceId, service without EnterpriseId,
-#   EnterpriseId not in the seed) is a **data-quality error row** — quarantined, never guessed.
-# - `PropertyID` is populated with the resolved enterprise identifier per BND-RES-004 (D-195).
+# - The identity table itself must have no more than one row per
+#   `PMS + SourceType + SourcePropertyCode` (D-229) — checked once, up front. If it does,
+#   the notebook **stops**; this is a governed-seed problem, not a per-reservation one.
+# - A reservation whose link breaks anywhere (unknown ServiceId, service without
+#   EnterpriseId, EnterpriseId not found in `B_PropertySourceIdentity` for this
+#   PMS/SourceType) is a **data-quality error row** — quarantined, never guessed.
+# - `D_Property.PMS_PropertyCode` is **not used** anywhere in this resolution — removed
+#   per Physical Governance Package A.
+# - `I_Reservations.PropertyID` is **not populated** here or anywhere in this notebook.
+#   It is nullable and unpopulated under D-235/C-283. (A stale comment in a prior draft
+#   cited `BND-RES-004` as authority for populating it — `BND-RES-004` binds `PropertyID`
+#   as a column definition, it is not authority to populate it now that D-235 makes it
+#   nullable; `BND-RES-003` is the binding that governs `PropertyKey`, which this section
+#   resolves.)
+# - No fuzzy matching, no generated identity key, no inferred SourceType, no
+#   compatibility path for the old `PMS_PropertyCode` route.
 
 
 # CELL ********************
 
 # ---------------------------------------------------------------
-# 8. Property lookup: ServiceId -> Services.EnterpriseId -> D_Property.
+# 8. Property lookup: ServiceId -> Services.EnterpriseId (=SourcePropertyCode)
+#    -> B_PropertySourceIdentity -> PropertyKey.
 # ---------------------------------------------------------------
 df_services = (df_svc_raw
     .select(F.col("Id").cast("string").alias("_SvcId"),
-            F.col("EnterpriseId").cast("string").alias("_EnterpriseId"))
+            # EnterpriseId IS the governed SourcePropertyCode - same value, governed name.
+            F.col("EnterpriseId").cast("string").alias("_SourcePropertyCode"))
     .dropDuplicates(["_SvcId"]))
+
+# --- B_PropertySourceIdentity: physical governed table, read directly (not the seed). ---
+df_identity_raw = spark.read.table(PROPERTY_IDENTITY_TABLE)
+
+df_identity = (df_identity_raw
+    .filter((F.col("PMS") == SOURCE_SYSTEM) & (F.col("SourceType") == SOURCE_TYPE))
+    .select(F.col("SourcePropertyCode").alias("_IdSourcePropertyCode"),
+            F.col("PropertyKey")))
+
+n_identity_rows = df_identity.count()
+print(f"{PROPERTY_IDENTITY_TABLE} rows for PMS='{SOURCE_SYSTEM}', SourceType='{SOURCE_TYPE}': "
+      f"{n_identity_rows}")
+df_identity.show(truncate=False)
+
+if n_identity_rows == 0:
+    raise RuntimeError(
+        f"No {PROPERTY_IDENTITY_TABLE} rows for PMS='{SOURCE_SYSTEM}', "
+        f"SourceType='{SOURCE_TYPE}'. Every reservation would quarantine as a property-"
+        "lookup failure. Check SOURCE_TYPE in Section 1 against the real identity table "
+        "before running the rest of this notebook."
+    )
+
+# Governance/data-integrity check on the identity table itself (D-229): at most one
+# row per PMS + SourceType + SourcePropertyCode. If this fails, every reservation
+# carrying that code would match more than one PropertyKey - stop here, once, rather
+# than quarantining every affected reservation one by one.
+n_identity_dupes = (df_identity.groupBy("_IdSourcePropertyCode").count()
+                     .filter("count > 1").count())
+if n_identity_dupes > 0:
+    raise RuntimeError(
+        f"{n_identity_dupes} SourcePropertyCode value(s) have more than one "
+        f"{PROPERTY_IDENTITY_TABLE} row for PMS='{SOURCE_SYSTEM}', "
+        f"SourceType='{SOURCE_TYPE}'. This is a governed-seed ambiguity (D-229) - "
+        "fix the identity table before resolving any reservation through it."
+    )
+
+n_before_join = df_versions.count()
 
 df_prop = (df_versions
     .join(df_services, df_versions._ServiceId == df_services._SvcId, "left")
-    .join(df_seed_property.select(
-              F.col("PMS_PropertyCode").alias("_PMS_PropertyCode"),
-              F.col("PropertyKey"),
-              F.col("PropertyID"),
-              F.col("TimeZone").alias("_TimeZone")),
-          F.col("_EnterpriseId") == F.col("_PMS_PropertyCode"), "left"))
+    .join(df_identity,
+          F.col("_SourcePropertyCode") == F.col("_IdSourcePropertyCode"), "left"))
 
-df_prop_failed = df_prop.filter(F.col("PropertyKey").isNull())
-df_resolved    = df_prop.filter(F.col("PropertyKey").isNotNull())                         .drop("_SvcId", "_PMS_PropertyCode")
+# Defensive check: a reservation row must never match more than one identity row.
+# The uniqueness check above should make this impossible - this proves it rather
+# than assuming it.
+n_after_join = df_prop.count()
+if n_after_join != n_before_join:
+    raise RuntimeError(
+        f"Property-lookup join changed row count ({n_before_join} -> {n_after_join}). "
+        "A reservation row matched more than one B_PropertySourceIdentity row - "
+        "stop, do not guess which one is right."
+    )
+
+df_prop_failed  = df_prop.filter(F.col("PropertyKey").isNull())
+df_resolved_ids = df_prop.filter(F.col("PropertyKey").isNotNull()) \
+                          .drop("_SvcId", "_IdSourcePropertyCode")
 
 n_prop_failed = df_prop_failed.count()
 print(f"Property lookup failed (quarantined, not guessed): {n_prop_failed}")
-print(f"Rows with resolved property:                       {df_resolved.count()}")
+print(f"Rows with resolved PropertyKey:                     {df_resolved_ids.count()}")
 
 if n_prop_failed > 0:
-    quarantine_batches.append(("PROPERTY_LOOKUP_FAILED_D195",
+    quarantine_batches.append(("PROPERTY_LOOKUP_FAILED_D223",
                                df_prop_failed.select("ReservationID", "SnapshotDateTime",
                                                      "PMSReservationID")))
     (df_prop_failed
-     .groupBy("_ServiceId", "_EnterpriseId").count()
+     .groupBy("_ServiceId", "_SourcePropertyCode").count()
      .show(20, truncate=False))
 
+# --- TimeZone: a plain D_Property dimension attribute here, needed for Section 9's
+# UTC -> local-date conversion. Not part of property resolution (that already
+# finished above) and never a fallback for it.
+df_resolved = (df_resolved_ids
+    .join(df_seed_property.select(F.col("PropertyKey").alias("_TzPropertyKey"),
+                                   F.col("TimeZone").alias("_TimeZone")),
+          df_resolved_ids.PropertyKey == F.col("_TzPropertyKey"), "left")
+    .drop("_TzPropertyKey"))
+
+n_tz_missing = df_resolved.filter(F.col("_TimeZone").isNull()).count()
+if n_tz_missing > 0:
+    raise RuntimeError(
+        f"{n_tz_missing} row(s) resolved a PropertyKey with no matching D_Property "
+        "TimeZone. Every PropertyKey in B_PropertySourceIdentity is expected to have "
+        "a D_Property row - fix the seed, do not guess a time zone."
+    )
 
 # METADATA ********************
 
@@ -704,7 +801,6 @@ if n_prop_failed > 0:
 # D-203 allows these two columns only because the property lookup resolved (Section 8)
 # and the seed readiness gate passed (Section 5b) — both are already guaranteed here.
 
-
 # CELL ********************
 
 # ---------------------------------------------------------------
@@ -727,7 +823,6 @@ if n_bad_order or n_null_arr or n_null_dep:
     raise RuntimeError("Stay-date validation failed — inspect raw scheduled timestamps "
                        "and seed TimeZone values before continuing.")
 
-
 # METADATA ********************
 
 # META {
@@ -746,7 +841,6 @@ if n_bad_order or n_null_arr or n_null_dep:
 # If Mews sends a state that is not in the seed, the row is routed to the governed
 # `UNKNOWN` member. That is not an error stop — it is a visible, counted signal
 # that the seed needs a new governed row.
-
 
 # CELL ********************
 
@@ -768,7 +862,6 @@ print(f"Rows routed to governed UNKNOWN status: {n_unknown}")
 if n_unknown > 0:
     print("Unmatched Mews State values (seed likely needs a governed update):")
     unknown_status.show(truncate=False)
-
 
 # METADATA ********************
 
@@ -797,7 +890,6 @@ if n_unknown > 0:
 # - Statuses outside the mapped five (e.g. UNKNOWN-routed ones) get NULL, and the basis
 #   stays NULL whenever the timestamp is NULL.
 # - OBSERVED must never be presented as an exact PMS event time.
-
 
 # CELL ********************
 
@@ -835,7 +927,6 @@ print("StatusDateTime coverage by Mews state:")
       .orderBy("PMSStatusCode")
       .show(truncate=False))
 
-
 # METADATA ********************
 
 # META {
@@ -861,7 +952,6 @@ print("StatusDateTime coverage by Mews state:")
 #   and it is flagged — it is explicitly forbidden to treat these as zero.
 # - A reservation with no `PersonCounts` at all keeps NULL (the contract allows blank
 #   when the source gives no party counts).
-
 
 # CELL ********************
 
@@ -932,7 +1022,6 @@ print("Adults/Children profile:")
     F.max("Adults").alias("MaxAdults"), F.max("Children").alias("MaxChildren"))
  .show(truncate=False))
 
-
 # METADATA ********************
 
 # META {
@@ -942,11 +1031,16 @@ print("Adults/Children profile:")
 
 # MARKDOWN ********************
 
-# ## 13. Tenant lookup (D-177)
+# ## 13. Tenant lookup (D-177 + D-235)
 # 
 # **Plain words:** every reservation row carries the governed tenant (the operating company
 # that owns the property context). The governed rule resolves tenant **from the property**,
 # using the manual property → tenant input.
+# 
+# **F-5 change:** D-235 (FINAL) makes `D_Property` the governed tenant object and states
+# `TenantKey`/`TenantID` resolve through `PropertyKey` — not `PropertyID`, which is now
+# nullable/unpopulated (C-283) and is never resolved anywhere in this notebook. The join
+# below uses `PropertyKey`, matching `TENANT_PROPERTY_COL` in Section 1.
 # 
 # **Open point you must confirm:** the binding references the `T_MI_Property` manual input,
 # but the D-198 seed allow-list names sheets like `D_Property` and `D_Tenant`. This draft
@@ -980,20 +1074,19 @@ if missing:
     )
 
 df_tenant = spark.createDataFrame(
-    tenant_pdf[needed].rename(columns={TENANT_PROPERTY_COL: "_TenPropertyID",
+    tenant_pdf[needed].rename(columns={TENANT_PROPERTY_COL: "_TenPropertyKey",
                                        TENANT_KEY_COL: "TenantKey",
-                                       TENANT_ID_COL: "TenantID"})).dropDuplicates(["_TenPropertyID"])
+                                       TENANT_ID_COL: "TenantID"})).dropDuplicates(["_TenPropertyKey"])
 
 df_tenanted = (df_people
-    .join(df_tenant, df_people.PropertyID == df_tenant._TenPropertyID, "left")
-    .drop("_TenPropertyID"))
+    .join(df_tenant, df_people.PropertyKey == df_tenant._TenPropertyKey, "left")
+    .drop("_TenPropertyKey"))
 
 n_tenant_missing = df_tenanted.filter(F.col("TenantKey").isNull()).count()
 print(f"Rows with unresolved tenant: {n_tenant_missing}  (expected 0)")
 if n_tenant_missing:
     raise RuntimeError("TenantKey is a governed not-null column; the property -> tenant "
                        "seed mapping does not cover every resolved property. Fix the seed.")
-
 
 # METADATA ********************
 
@@ -1010,7 +1103,6 @@ if n_tenant_missing:
 # reports need an easy way to grab only the newest version of each reservation.
 # `IsLatestCurrent = TRUE` marks exactly one row per `ReservationID` — the one with the
 # highest `SnapshotDateTime`. Everything older is FALSE.
-
 
 # CELL ********************
 
@@ -1033,7 +1125,6 @@ print(f"Distinct reservations: {n_res} | rows flagged TRUE: {n_true} (must be eq
 if n_res != n_true:
     raise RuntimeError("IsLatestCurrent flag inconsistent with distinct reservation count.")
 
-
 # METADATA ********************
 
 # META {
@@ -1051,6 +1142,9 @@ if n_res != n_true:
 # "not implemented yet in this slice".
 # 
 # Columns intentionally NULL in this slice (with the reason):
+# - `PropertyID` — nullable and unpopulated by design (D-235/C-283), not a gap to fill later.
+#   `PropertyKey` (above) is the resolution/tenant key; `PropertyID` must never be used
+#   for resolution, tenant, or readiness.
 # - `CustomerID`, `AccountID` — customer/account lookup not governed (I-076)
 # - `MarketCountryKey` — market-country mapping not governed (I-076)
 # - `BlockID`, `IsBlockPickupReservation` — block source deferred (I-143)
@@ -1084,8 +1178,8 @@ df_final = df_flagged.select(
     # --- governed populated columns ---
     F.col("ReservationID"),                                   # D-192
     F.col("PMSReservationID"),                                # D-192
-    F.col("PropertyKey"),                                     # D-195/D-205
-    F.col("PropertyID"),                                      # D-195
+    F.col("PropertyKey"),                                     # D-195/D-223-D-234 (F-5)
+    null_str().alias("PropertyID"),                           # D-235/C-283: nullable, unpopulated
     # --- governed NULLs (D-203) ---
     null_str().alias("CustomerID"),                           # I-076
     null_str().alias("AccountID"),                            # I-076
@@ -1140,7 +1234,6 @@ df_final = df_flagged.select(
 print(f"Final I_Reservations rows: {df_final.count()}")
 print(f"Final column count:        {len(df_final.columns)}  (expected 43)")
 
-
 # METADATA ********************
 
 # META {
@@ -1160,7 +1253,6 @@ print(f"Final column count:        {len(df_final.columns)}  (expected 43)")
 # 
 # Quarantined rows (snapshot collisions, failed property lookups, age-category exceptions)
 # go into one small side table with a reason code, so nothing disappears silently.
-
 
 # CELL ********************
 
@@ -1194,7 +1286,6 @@ if quarantine_batches:
 else:
     print("No quarantined rows in this build — quarantine table not written.")
 
-
 # METADATA ********************
 
 # META {
@@ -1219,7 +1310,6 @@ else:
 # 
 # Run all of them. If any check prints a FAIL, do not build anything on top of this table.
 
-
 # CELL ********************
 
 # ---------------------------------------------------------------
@@ -1239,7 +1329,6 @@ expected = len(raw_reservations) - n_exact_dupes - n_collisions - n_prop_failed
 status = "OK" if n_written == expected else "FAIL"
 print(f"  Funnel arithmetic: expected {expected} -> {status}")
 
-
 # METADATA ********************
 
 # META {
@@ -1257,7 +1346,6 @@ n_dup_grain = (t.groupBy("ReservationID", "SnapshotDateTime")
 print(f"Duplicate grain keys in written table: {n_dup_grain} "
       f"-> {'OK' if n_dup_grain == 0 else 'FAIL'}")
 
-
 # METADATA ********************
 
 # META {
@@ -1271,6 +1359,7 @@ print(f"Duplicate grain keys in written table: {n_dup_grain} "
 # 17c. NULL profile: intentional NULLs = 100%, governed not-null = 0%.
 # ---------------------------------------------------------------
 INTENTIONALLY_NULL = [
+    "PropertyID",  # D-235/C-283: nullable/unpopulated by design, not a gap
     "CustomerID", "AccountID", "MarketCountryKey", "BlockID",
     "BookedRoomRevenue", "BookedTotalRevenue",
     "RoomTypeKey", "PMS_RoomTypeCode", "RatePlanKey", "PMS_RatePlanCode",
@@ -1281,7 +1370,7 @@ INTENTIONALLY_NULL = [
     "BookedRevenueNormalizationMethod", "AppliedCommissionPct",
 ]
 MUST_BE_POPULATED = [
-    "ReservationID", "PMSReservationID", "PropertyKey", "PropertyID",
+    "ReservationID", "PMSReservationID", "PropertyKey",
     "IsGroupReservation", "BookingDateTime", "ArrivalDate", "DepartureDate",
     "ReservationStatusKey", "PMSStatusCode", "BookedRooms",
     "SourceSystem", "SnapshotDateTime", "IsLatestCurrent",
@@ -1305,7 +1394,6 @@ for c in MUST_BE_POPULATED:
     print(f"  {c:<38} nulls={nulls[c]:>6}  {'OK' if good else 'FAIL'}")
 
 print("\nOverall NULL profile:", "OK" if ok else "FAIL")
-
 
 # METADATA ********************
 
@@ -1332,7 +1420,6 @@ print(f"Rows with NULL Adults / Children:              {n_null_adults} / {n_null
 print("\nStatusDateTimeBasis distribution:")
 t.groupBy("ReservationStatusKey", "StatusDateTimeBasis").count() \
  .orderBy("ReservationStatusKey").show(truncate=False)
-
 
 # METADATA ********************
 
@@ -1367,7 +1454,6 @@ t.select("ReservationID", "PMSReservationID", "PropertyKey", "ArrivalDate",
          "SnapshotDateTime", "IsLatestCurrent") \
  .orderBy("ReservationID", "SnapshotDateTime").show(10, truncate=False)
 
-
 # METADATA ********************
 
 # META {
@@ -1392,4 +1478,3 @@ t.select("ReservationID", "PMSReservationID", "PropertyKey", "ArrivalDate",
 # 
 # **Reminder: pause Fabric capacity `fabaurorabiv1devf2` in Azure if you are done working,
 # to avoid unnecessary cost.**
-

@@ -239,13 +239,21 @@ if n_dup_id:
                        "fix I_RoomNights before building the fact.")
 print("RoomNightID null/uniqueness gates OK.")
 
+# D-236 (FINAL): PropertyID (C-201 on this fact, carried from I_RoomNights C-356) is
+# nullable and remains an unpopulated, traceability-only attribute for as long as
+# I_Reservations.PropertyID (C-283) is unpopulated under D-235/BND-RES-004. It must
+# still exist as a column (checked above via CARRIED_COLS) but is excluded from the
+# not-null gate below. PropertyKey (unaffected by D-236) remains the sole relationship
+# key and stays fully enforced.
+CARRIED_NOT_NULL_INPUT_COLS = [c for c in CARRIED_COLS if c != "PropertyID"]
+
 # Gate: carried not-null columns clean on the input side.
-for c in CARRIED_COLS:
+for c in CARRIED_NOT_NULL_INPUT_COLS:
     n_null = df_in.filter(F.col(c).isNull()).count()
     if n_null:
         raise RuntimeError(f"Input column '{c}' has {n_null} NULLs but is governed "
                            "not-null on the fact. Fix upstream — no silent patching.")
-print("Carried not-null columns are clean on input.")
+print("Carried not-null columns (excl. PropertyID, D-236) are clean on input.")
 
 # METADATA ********************
 
@@ -700,11 +708,15 @@ UNGOVERNED_NULL_COLS = [
     "IsBlockPickupRoomNight", "RevenueStreamKey",
 ]
 CARRIED_NOT_NULL_COLS = [
-    "RoomNightID", "ReservationID", "PropertyKey", "PropertyID", "StayDate",
+    "RoomNightID", "ReservationID", "PropertyKey", "StayDate",
     "SnapshotDateTime", "ReservationStatusKey", "IsGroupReservation", "BookingDateTime",
     "ArrivalDate", "DepartureDate", "LOS_Nights", "BookingWindowDays", "IsLatestCurrent",
     "TenantKey", "TenantID", "IsDayUse",
 ]
+# D-236 (FINAL): PropertyID (C-201) is nullable and excluded from the list above —
+# checked separately below, since its expected 100% NULL is a specific governed
+# correction (D-236), not general ungoverned business logic like the columns in
+# UNGOVERNED_NULL_COLS.
 
 all_ok = True
 for c in UNGOVERNED_NULL_COLS:
@@ -722,7 +734,13 @@ for c in CARRIED_NOT_NULL_COLS:
     all_ok = all_ok and ok
     if not ok:
         print(f"  {c}: {n_null} NULL values -> FAIL (governed not-null)")
-print(f"0% NULL on all 17 carried columns -> {'OK' if all_ok else 'FAIL'}")
+print(f"0% NULL on all 16 carried not-null columns -> {'OK' if all_ok else 'FAIL'}")
+
+# D-236 (FINAL): PropertyID (C-201) is nullable, ACTIVE, and expected to remain
+# 100% NULL for now (traceability-only; never a resolution/relationship key).
+n_propertyid_not_null = t_fact.filter(F.col("PropertyID").isNotNull()).count()
+print(f"  PropertyID: {n_propertyid_not_null} non-NULL values -> "
+      f"{'OK' if n_propertyid_not_null == 0 else 'FAIL'} (D-236: expected 100% NULL for now)")
 
 # METADATA ********************
 

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "Notebook",
-    "displayName": "NB_Menja_Phase1_20_I_RoomNights_BUILD_DRAFT",
+    "displayName": "NB30_F_RoomNights_BUILD_DRAFT",
     "description": "New notebook"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "2a4f9867-7b31-92bc-4058-9a1025b55445"
+    "logicalId": "3d9d799d-b962-be14-42a7-3a688a0ad6ee"
   }
 }

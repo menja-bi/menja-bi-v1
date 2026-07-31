@@ -89,7 +89,6 @@ WRITE_MODE = "overwrite"
 # This pattern renders that stored value losslessly and deterministically.
 SNAPSHOT_ISO_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"   # <-- CONFIRM rendering precision
 
-
 # METADATA ********************
 
 # META {
@@ -134,7 +133,6 @@ if session_tz != "UTC":
         "Do not override silently — investigate before running."
     )
 print("Session time zone OK: UTC")
-
 
 # METADATA ********************
 
@@ -198,7 +196,6 @@ if n_not_one:
     raise RuntimeError(f"{n_not_one} input rows have BookedRooms <> 1. Multi-room mechanics "
                        "are out of scope under D-207 — stop, do not fan out ungoverned rows.")
 print("BookedRooms = 1 check OK (slice boundary respected).")
-
 
 # METADATA ********************
 
@@ -267,7 +264,6 @@ df_seed_tz = spark.createDataFrame(
 print("D_Property time-zone seed OK:", prop_pdf.shape[0], "properties.")
 df_seed_tz.show(truncate=False)
 
-
 # METADATA ********************
 
 # META {
@@ -333,7 +329,6 @@ expected_dayuse_rows = n_dayuse
 print(f"Expected overnight room-night rows (sum of nights): {expected_overnight_rows}")
 print(f"Expected day-use rows (one per version):            {expected_dayuse_rows}")
 
-
 # METADATA ********************
 
 # META {
@@ -381,7 +376,6 @@ print(f"Day-use rows generated:              {n_du_rows} "
 if n_on_rows != expected_overnight_rows or n_du_rows != expected_dayuse_rows:
     raise RuntimeError("Expansion produced a different row count than the pre-computed "
                        "expectation — stop and inspect.")
-
 
 # METADATA ********************
 
@@ -456,7 +450,6 @@ print("Sample RoomNightID values:")
 df_derived.select("RoomNightID", "IsDayUse", "LOS_Nights", "BookingWindowDays") \
           .show(5, truncate=False)
 
-
 # METADATA ********************
 
 # META {
@@ -500,7 +493,6 @@ print(f"Distinct room-night groups:  {n_groups} -> "
       f"{'OK' if n_latest == n_groups else 'FAIL (must be equal)'}")
 if n_latest != n_groups:
     raise RuntimeError("IsLatestCurrent flagging is inconsistent — stop.")
-
 
 # METADATA ********************
 
@@ -611,7 +603,6 @@ print(f"Final column count:       {len(df_final.columns)}  (expected 44)")
 if len(df_final.columns) != 44:
     raise RuntimeError("Column count is not 44 — projection does not match the contract.")
 
-
 # METADATA ********************
 
 # META {
@@ -659,7 +650,6 @@ if n_invalid > 0:
     print(f"Wrote {DQ_TABLE}: {n_invalid} rows.")
 else:
     print(f"No invalid versions in this build — {DQ_TABLE} not written.")
-
 
 # METADATA ********************
 
@@ -721,7 +711,6 @@ else:
 print(f"  Rows from invalid versions in output: {n_leaked} -> "
       f"{'OK' if n_leaked == 0 else 'FAIL'}")
 
-
 # METADATA ********************
 
 # META {
@@ -744,7 +733,6 @@ print(f"Duplicate grain tuples:         {n_dup_grain} -> "
 
 n_null_id = t.filter(F.col("RoomNightID").isNull()).count()
 print(f"NULL RoomNightID values:        {n_null_id} -> {'OK' if n_null_id == 0 else 'FAIL'}")
-
 
 # METADATA ********************
 
@@ -771,7 +759,6 @@ print(f"Groups without exactly one IsLatestCurrent=TRUE: {n_bad_count} -> "
 print(f"Groups where TRUE is not the newest snapshot:    {n_bad_pick} -> "
       f"{'OK' if n_bad_pick == 0 else 'FAIL'}")
 
-
 # METADATA ********************
 
 # META {
@@ -794,12 +781,17 @@ UNGOVERNED_NULL_COLS = [
 ]
 NOT_NULL_GOVERNED_COLS = [
     "RoomNightID", "ReservationID", "LOS_Nights", "RoomsBooked", "BookedRoomIndex",
-    "BookingWindowDays", "SnapshotDateTime", "SourceSystem", "PropertyKey", "PropertyID",
+    "BookingWindowDays", "SnapshotDateTime", "SourceSystem", "PropertyKey",
     "IsGroupReservation", "BookingDateTime", "ArrivalDate", "DepartureDate", "StayDate",
     "ReservationStatusKey", "PMSStatusCode", "IsLatestCurrent",
     "TenantKey", "TenantID", "IsDayUse",
 ]
 # (PMSReservationID, Children, Adults, StatusDateTime are nullable in the contract.)
+# D-236 (FINAL): PropertyID (C-356) is nullable and remains an unpopulated,
+# traceability-only attribute for as long as I_Reservations.PropertyID (C-283) is
+# unpopulated under D-235/BND-RES-004. It is intentionally excluded from
+# NOT_NULL_GOVERNED_COLS above. PropertyKey (already governed not-null, unchanged
+# by D-236) remains the sole relationship key.
 
 print(f"Ungoverned columns written NULL this slice: {len(UNGOVERNED_NULL_COLS)}")
 all_ok = True
@@ -820,6 +812,14 @@ for c in NOT_NULL_GOVERNED_COLS:
         print(f"  {c}: {n_null} NULL values -> FAIL (governed not-null)")
 print(f"  0% NULL on governed not-null columns -> {'OK' if all_ok else 'FAIL'}")
 
+# D-236 (FINAL): PropertyID (C-356) is nullable, ACTIVE, and expected to remain
+# 100% NULL for now (traceability-only; never a resolution/relationship key).
+# This is checked separately from the ungoverned-columns list above because the
+# reason it is NULL is a specific governed correction (D-236), not general
+# ungoverned business logic.
+n_propertyid_not_null = t.filter(F.col("PropertyID").isNotNull()).count()
+print(f"  PropertyID: {n_propertyid_not_null} non-NULL values -> "
+      f"{'OK' if n_propertyid_not_null == 0 else 'FAIL'} (D-236: expected 100% NULL for now)")
 
 # METADATA ********************
 
@@ -869,7 +869,6 @@ t.agg(F.min("BookingWindowDays").alias("Min"),
 
 print("Latest-current day-use / overnight split (visibility):")
 t.filter("IsLatestCurrent").groupBy("IsDayUse").count().show(truncate=False)
-
 
 # METADATA ********************
 

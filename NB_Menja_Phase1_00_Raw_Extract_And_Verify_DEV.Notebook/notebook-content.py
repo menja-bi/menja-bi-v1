@@ -135,24 +135,9 @@ print("Standard raw root for this run:", RAW_ROOT)
 
 # CELL ********************
 
-# Section 2 - Key Vault secrets (never print secret values)
-
-vault_url = "https://kv-menja-biv1.vault.azure.net/"
-
-mews_access_token = notebookutils.credentials.getSecret(
-    vault_url,
-    "mews-access-token"
-)
-
-mews_client_token = notebookutils.credentials.getSecret(
-    vault_url,
-    "mews-client-token"
-)
-
-print("Mews Key Vault secrets loaded.")
-print("Access token loaded:", len(mews_access_token) > 0)
-print("Client token loaded:", len(mews_client_token) > 0)
-
+df = spark.read.option("multiline", "true").json("Files/Raw/Mews/reservations/reservations_2026-07-06_064648_4fe14039_20260329_20260401_page_001.json")
+# df now is a Spark DataFrame containing JSON data from "Files/Raw/Mews/reservations/reservations_2026-07-06_064648_4fe14039_20260329_20260401_page_001.json".
+display(df)
 
 # METADATA ********************
 

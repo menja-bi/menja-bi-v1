@@ -26,11 +26,34 @@
 # 
 # **Purpose:** land and verify ALL Phase-1 raw Mews inputs in one governed notebook.
 # 
-# Endpoints landed by this notebook:
+# **Scope:** the eleven raw source objects marked `ActiveForBIv1 = True` in
+# `07_Raw_Source_Objects` of `Menja_Schema_Governance_0626.xlsx`.
 # 
-# 1. `reservations/getAll/2023-06-06` (current versioned endpoint; old version deprecated 10 Jan 2026)
-# 2. `services/getAll`
-# 3. `ageCategories/getAll`
+# | # | RawObjectID | Endpoint called by this notebook | Landed by |
+# |---|---|---|---|
+# | 1 | RAW_MEWS_RESERVATIONS | `reservations/getAll/2023-06-06` | Section 5 |
+# | 2 | RAW_MEWS_SERVICES | `services/getAll` | Section 6 |
+# | 3 | RAW_MEWS_AGE_CATEGORIES | `ageCategories/getAll` | Section 6 |
+# | 4 | RAW_MEWS_AVAILABILITY_BLOCKS | `availabilityBlocks/getAll` | Section 6B |
+# | 5 | RAW_MEWS_BUSINESS_SEGMENTS | `businessSegments/getAll` | Section 6B |
+# | 6 | RAW_MEWS_COMPANIES | `companies/getAll` | Section 6B |
+# | 7 | RAW_MEWS_ORDER_ITEMS | `orderItems/getAll` | Section 6B |
+# | 8 | RAW_MEWS_RATES | `rates/getAll` | Section 6B |
+# | 9 | RAW_MEWS_RESOURCE_BLOCKS | `resourceBlocks/getAll` | Section 6B |
+# | 10 | RAW_MEWS_RESOURCE_CATEGORIES | `resourceCategories/getAll` | Section 6B |
+# | 11 | RAW_MEWS_RESOURCES | `resources/getAll` | Section 6B |
+# 
+# Row 1 calls the current versioned reservations endpoint. `reservations/getAll`
+# without a version suffix is deprecated and takes an incompatible body, so the
+# workbook value `EndpointOrEntity = reservations/getAll` is read as the object
+# name, not as the literal URL.
+# 
+# **Deliberately NOT landed here:**
+# 
+# - `reservationGroups/getAll` - `ActiveForBIv1 = Review` under D-200, pending I-193.
+# - `bills/getAll` and `configuration/get` - parked in `09_ObjectDictionary` only (D-159).
+# 
+# Section 3 stops the run if the configured object set is not exactly these eleven.
 # 
 # **Standard raw root:** `Files/Raw/Mews/...` (capital R, capital M).
 # Section 1 WARNS if a lowercase `Files/raw` (or other case variant) exists.
@@ -49,7 +72,17 @@
 # | D-149 | Extractor is raw-only, no modeled tables or business logic |
 # | D-151 | Stable root folder, endpoint subfolder, timestamp in filename |
 # | D-153 | Bounded date windows, chunking, page caps for heavy endpoints |
+# | D-159 | The governed KEEP NOW raw object set for BI v1 ETL scope |
 # | D-186 | ExtractionRunLog + ExtractionFileLog as Delta tables |
+# | D-200 | reservationGroups is review-only, not an active raw object |
+# | D-201 | ageCategories is a governed active raw object |
+# 
+# **Known governance gap - NOT closed by this notebook.**
+# D-186 was revised on 2026-07-25 and now requires `PropertyKey`, `SourceType`,
+# `SourcePropertyCode`, `MewsScopeType`, and `MewsScopeIds` on both log tables.
+# This notebook still writes the original D-186 field set. Closing that gap needs
+# the governed property/source resolution in D-215 / D-223 / D-228 and is a
+# separate governed change. See `NB00_11Objects_AMENDMENT_REVIEW.md`.
 # 
 # **Before running:**
 # 1. Attach lakehouse `LH_Menja_BI_v1_Mews_DEV` to this notebook FIRST.
@@ -131,13 +164,42 @@ print("Standard raw root for this run:", RAW_ROOT)
 # 
 # Reads the two Mews API tokens from Azure Key Vault `kv-menja-biv1`.
 # Secret values are never printed - only a yes/no that they loaded.
+# 
+# Key Vault is addressed by its **full URI**. The bare vault name does not work
+# from Fabric and was one of the four Mews/Fabric bugs already fixed in this
+# project.
 
 
 # CELL ********************
 
-df = spark.read.option("multiline", "true").json("Files/Raw/Mews/reservations/reservations_2026-07-06_064648_4fe14039_20260329_20260401_page_001.json")
-# df now is a Spark DataFrame containing JSON data from "Files/Raw/Mews/reservations/reservations_2026-07-06_064648_4fe14039_20260329_20260401_page_001.json".
-display(df)
+# Section 2 - Mews API tokens from Azure Key Vault
+# Secret VALUES are never printed, logged, or written to any file.
+
+from notebookutils import mssparkutils
+
+KEY_VAULT_URI = "https://kv-menja-biv1.vault.azure.net/"
+CLIENT_TOKEN_SECRET_NAME = "mews-client-token"
+ACCESS_TOKEN_SECRET_NAME = "mews-access-token"
+
+mews_client_token = mssparkutils.credentials.getSecret(
+    KEY_VAULT_URI, CLIENT_TOKEN_SECRET_NAME
+)
+mews_access_token = mssparkutils.credentials.getSecret(
+    KEY_VAULT_URI, ACCESS_TOKEN_SECRET_NAME
+)
+
+if not mews_client_token or not mews_access_token:
+    raise RuntimeError(
+        "One or both Mews tokens are empty. Check the secret names in "
+        + KEY_VAULT_URI
+        + " and that this notebook's identity has Get permission on secrets."
+    )
+
+print("Key Vault URI:      ", KEY_VAULT_URI)
+print("Client token loaded:", bool(mews_client_token))
+print("Access token loaded:", bool(mews_access_token))
+print("Secret values are never printed by this notebook.")
+
 
 # METADATA ********************
 
@@ -153,14 +215,36 @@ display(df)
 # All parameters live here. No hidden defaults elsewhere.
 # 
 # Notes:
-# - Endpoint subfolders are kept EXACTLY where earlier committed runs landed files
-#   (`reservations`, `services/getAll`, `ageCategories/getAll`). Unifying the
-#   subfolder naming later is a manual cleanup decision, not something this
-#   notebook does silently.
+# - Endpoint subfolders for reservations, services, and ageCategories are kept
+#   EXACTLY where earlier committed runs landed files (`reservations`,
+#   `services/getAll`, `ageCategories/getAll`). Unifying the subfolder naming
+#   later is a manual cleanup decision, not something this notebook does silently.
+#   The eight objects added by this amendment use `<endpoint>` as their subfolder,
+#   which matches the `services/getAll` / `ageCategories/getAll` pattern.
 # - The reservations window is the same bounded window the proven landing run
 #   used (D-153). Widen it deliberately when you decide to - keep it bounded.
 # - `RES_SERVICE_IDS` is the Mews demo service used by the committed landing
 #   notebook. Widening to more services is a user decision, not a default.
+# 
+# **Two config lists, on purpose:**
+# 
+# - `RAW_SIMPLE_ENDPOINTS` - services and ageCategories. One POST, one file, no
+#   `Limitation` block. This is the proven committed pattern and is unchanged.
+# - `RAW_PAGED_ENDPOINTS` - the eight objects added by this amendment. Cursor
+#   paging, and bounded chunking plus a page cap where a Mews time filter is used.
+# 
+# **`request_contract` on each paged object:**
+# 
+# - `VERIFIED_IN_PROJECT` - the required request shape is recorded as a verified
+#   Mews API fact in `Menja_BI_v1_AI_Working_Context.md`.
+# - `UNVERIFIED` - the body below is the **minimum** request this notebook can
+#   send without inventing a filter. It has not been checked against
+#   docs.mews.com inside this repo. If Mews rejects it, Section 4 now prints the
+#   Mews error message. Read that message and set the body here explicitly.
+#   Do not guess.
+# 
+# The scope guard at the end of this cell stops the run before any API call if
+# the configured set is not exactly the eleven `ActiveForBIv1 = True` objects.
 
 
 # CELL ********************
@@ -213,13 +297,272 @@ TIMEOUT_SEC = 60
 RETRIES = 3
 RETRY_SLEEP_SEC = 3
 
+# =====================================================================
+# Amendment: the remaining eight governed ActiveForBIv1 raw objects
+# =====================================================================
+
+# Verified Mews API fact: every Mews time-interval filter (UpdatedUtc,
+# CreatedUtc, ConsumedUtc, ClosedUtc, CanceledUtc) caps at 3 months per call.
+# The chunk sizes below stay far inside that; this constant makes the limit
+# checkable instead of implicit.
+MEWS_MAX_INTERVAL_DAYS = 90
+
+# Page caps per object class (D-153). A cap that is hit with more data
+# remaining marks the run Partial - it never silently truncates.
+REF_MAX_PAGES = 20              # reference objects, no time filter
+BLOCK_MAX_PAGES_PER_CHUNK = 5   # block objects, same density class as reservations
+ORDER_ITEMS_MAX_PAGES_PER_CHUNK = 20  # order items are dense: a read-only
+                                      # inspection on 2026-08-01 saw 7,615 items
+
+# orderItems is filtered on UpdatedUtc, which is RECORD-CHANGE time, not stay
+# time. It does NOT correspond to the reservations CollidingUtc stay window,
+# and no alignment between the two is implied or asserted here. Widening or
+# realigning this window is a deliberate user decision.
+ORDER_ITEMS_WINDOW_START_UTC = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+ORDER_ITEMS_WINDOW_END_UTC   = datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+RAW_PAGED_ENDPOINTS = [
+    {
+        "raw_object_id": "RAW_MEWS_AVAILABILITY_BLOCKS",
+        "endpoint": "availabilityBlocks/getAll",
+        "folder": RAW_ROOT + "/availabilityBlocks/getAll",
+        "record_keys": ["AvailabilityBlocks"],
+        "static_body": {"ServiceIds": RES_SERVICE_IDS},
+        "time_filter": "CollidingUtc",
+        "window_start_utc": WINDOW_START_UTC,
+        "window_end_utc": WINDOW_END_UTC,
+        "chunk_days": RES_CHUNK_DAYS,
+        "max_pages_per_chunk": BLOCK_MAX_PAGES_PER_CHUNK,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "ServiceIds + CollidingUtc mirrors the proven reservations call. "
+            "09_ObjectDictionary also records Adjustments, ServiceOrders, and "
+            "Rates response roots for this endpoint, which suggests an Extent "
+            "block exists. No Extent is sent because its exact field names are "
+            "not verified in this repo."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_BUSINESS_SEGMENTS",
+        "endpoint": "businessSegments/getAll",
+        "folder": RAW_ROOT + "/businessSegments/getAll",
+        "record_keys": ["BusinessSegments"],
+        "static_body": {},
+        "time_filter": None,
+        "window_start_utc": None,
+        "window_end_utc": None,
+        "chunk_days": None,
+        "max_pages_per_chunk": REF_MAX_PAGES,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "Sent with paging only. No filter is asserted. "
+            "09_ObjectDictionary records a Cursor root for this endpoint."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_COMPANIES",
+        "endpoint": "companies/getAll",
+        "folder": RAW_ROOT + "/companies/getAll",
+        "record_keys": ["Companies"],
+        "static_body": {},
+        "time_filter": None,
+        "window_start_utc": None,
+        "window_end_utc": None,
+        "chunk_days": None,
+        "max_pages_per_chunk": REF_MAX_PAGES,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": "Sent with paging only. No filter is asserted.",
+    },
+    {
+        "raw_object_id": "RAW_MEWS_ORDER_ITEMS",
+        "endpoint": "orderItems/getAll",
+        "folder": RAW_ROOT + "/orderItems/getAll",
+        "record_keys": ["OrderItems"],
+        "static_body": {},
+        "time_filter": "UpdatedUtc",
+        "window_start_utc": ORDER_ITEMS_WINDOW_START_UTC,
+        "window_end_utc": ORDER_ITEMS_WINDOW_END_UTC,
+        "chunk_days": RES_CHUNK_DAYS,
+        "max_pages_per_chunk": ORDER_ITEMS_MAX_PAGES_PER_CHUNK,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "VERIFIED_IN_PROJECT",
+        "contract_note": (
+            "Mews requires at least one of OrderItemIds, AccountIds, "
+            "ServiceOrderIds, ServiceIds, BillIds, CreatedUtc, UpdatedUtc, "
+            "ConsumedUtc, CanceledUtc, ClosedUtc. UpdatedUtc alone satisfies "
+            "that. ServiceIds is deliberately NOT added: whether the Mews "
+            "filter can drop items that still carry a payload link is the open "
+            "echo-control question in I-215."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_RATES",
+        "endpoint": "rates/getAll",
+        "folder": RAW_ROOT + "/rates/getAll",
+        "record_keys": ["Rates"],
+        "static_body": {"ServiceIds": RES_SERVICE_IDS},
+        "time_filter": None,
+        "window_start_utc": None,
+        "window_end_utc": None,
+        "chunk_days": None,
+        "max_pages_per_chunk": REF_MAX_PAGES,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "Rates are service-scoped in the governed dictionary "
+            "(Rates[].ServiceId), so the same RES_SERVICE_IDS scope as "
+            "reservations is used. No time filter is asserted."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_RESOURCE_BLOCKS",
+        "endpoint": "resourceBlocks/getAll",
+        "folder": RAW_ROOT + "/resourceBlocks/getAll",
+        "record_keys": ["ResourceBlocks"],
+        "static_body": {},
+        "time_filter": "CollidingUtc",
+        "window_start_utc": WINDOW_START_UTC,
+        "window_end_utc": WINDOW_END_UTC,
+        "chunk_days": RES_CHUNK_DAYS,
+        "max_pages_per_chunk": BLOCK_MAX_PAGES_PER_CHUNK,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "ResourceBlocks carry StartUtc/EndUtc and no ServiceId in the "
+            "governed dictionary, so the object is enterprise-scoped and only "
+            "a colliding time window is sent."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_RESOURCE_CATEGORIES",
+        "endpoint": "resourceCategories/getAll",
+        "folder": RAW_ROOT + "/resourceCategories/getAll",
+        "record_keys": ["ResourceCategories"],
+        "static_body": {},
+        "time_filter": None,
+        "window_start_utc": None,
+        "window_end_utc": None,
+        "chunk_days": None,
+        "max_pages_per_chunk": REF_MAX_PAGES,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "07_Raw_Source_Objects governs this object as FULL_SNAPSHOT_APPEND "
+            "with IncrementalDriver = NONE, so no time filter is sent."
+        ),
+    },
+    {
+        "raw_object_id": "RAW_MEWS_RESOURCES",
+        "endpoint": "resources/getAll",
+        "folder": RAW_ROOT + "/resources/getAll",
+        "record_keys": ["Resources"],
+        "static_body": {},
+        "time_filter": None,
+        "window_start_utc": None,
+        "window_end_utc": None,
+        "chunk_days": None,
+        "max_pages_per_chunk": REF_MAX_PAGES,
+        "page_size": RES_PAGE_SIZE,
+        "request_contract": "UNVERIFIED",
+        "contract_note": (
+            "Sent with paging only. 09_ObjectDictionary records "
+            "ResourceCategories, ResourceCategoryAssignments, "
+            "ResourceCategoryImageAssignments, ResourceFeatures, and "
+            "ResourceFeatureAssignments response roots, which suggests an "
+            "Extent block exists. No Extent is sent because its exact field "
+            "names are not verified in this repo."
+        ),
+    },
+]
+
+# =====================================================================
+# Governed scope guard (D-159 + D-201, with D-200 exclusion)
+# =====================================================================
+# The eleven ActiveForBIv1 = True rows in 07_Raw_Source_Objects of
+# Menja_Schema_Governance_0626.xlsx. This is a scope assertion, not model
+# logic: it stops the run before any API call if the configured set drifts.
+
+GOVERNED_ACTIVE_RAW_OBJECT_IDS = {
+    "RAW_MEWS_AVAILABILITY_BLOCKS",
+    "RAW_MEWS_BUSINESS_SEGMENTS",
+    "RAW_MEWS_COMPANIES",
+    "RAW_MEWS_ORDER_ITEMS",
+    "RAW_MEWS_RATES",
+    "RAW_MEWS_RESERVATIONS",
+    "RAW_MEWS_RESOURCE_BLOCKS",
+    "RAW_MEWS_RESOURCE_CATEGORIES",
+    "RAW_MEWS_RESOURCES",
+    "RAW_MEWS_SERVICES",
+    "RAW_MEWS_AGE_CATEGORIES",
+}
+
+# Endpoints that must NOT be landed by this notebook.
+NOT_ACTIVE_ENDPOINTS = {
+    "reservationGroups/getAll",  # ActiveForBIv1 = Review (D-200, open I-193)
+    "bills/getAll",              # parked in 09_ObjectDictionary only (D-159)
+    "configuration/get",         # parked in 09_ObjectDictionary only (D-159)
+}
+
+# Endpoint strings this run is expected to key its results on.
+GOVERNED_ACTIVE_ENDPOINTS = (
+    {RESERVATIONS_ENDPOINT}
+    | {e["endpoint"] for e in RAW_SIMPLE_ENDPOINTS}
+    | {e["endpoint"] for e in RAW_PAGED_ENDPOINTS}
+)
+
+_configured_object_ids = (
+    {"RAW_MEWS_RESERVATIONS"}
+    | {e["raw_object_id"] for e in RAW_SIMPLE_ENDPOINTS}
+    | {e["raw_object_id"] for e in RAW_PAGED_ENDPOINTS}
+)
+
+_scope_problems = []
+
+_missing = sorted(GOVERNED_ACTIVE_RAW_OBJECT_IDS - _configured_object_ids)
+if _missing:
+    _scope_problems.append("governed active objects not configured: " + str(_missing))
+
+_extra = sorted(_configured_object_ids - GOVERNED_ACTIVE_RAW_OBJECT_IDS)
+if _extra:
+    _scope_problems.append("configured objects that are not governed active: " + str(_extra))
+
+_blocked = sorted(GOVERNED_ACTIVE_ENDPOINTS & NOT_ACTIVE_ENDPOINTS)
+if _blocked:
+    _scope_problems.append("endpoints that must not be landed here: " + str(_blocked))
+
+for _e in RAW_PAGED_ENDPOINTS:
+    if _e["time_filter"] and _e["chunk_days"] > MEWS_MAX_INTERVAL_DAYS:
+        _scope_problems.append(
+            _e["endpoint"] + " chunk_days exceeds the Mews "
+            + str(MEWS_MAX_INTERVAL_DAYS) + "-day interval cap"
+        )
+
+if _scope_problems:
+    raise RuntimeError(
+        "Governed raw scope check failed (D-159 / D-200 / D-201). "
+        "Nothing was requested from Mews. Problems: " + " | ".join(_scope_problems)
+    )
+
 print("Config loaded.")
 print("Raw root:", RAW_ROOT)
 print("Reservations endpoint:", RESERVATIONS_ENDPOINT)
 print("Reservations window:", WINDOW_START_UTC.date(), "to", WINDOW_END_UTC.date())
-print("Simple endpoints:")
+print("Simple endpoints (one POST, no paging):")
 for e in RAW_SIMPLE_ENDPOINTS:
     print(" -", e["raw_object_id"], "|", e["endpoint"])
+print("Paged endpoints:")
+for e in RAW_PAGED_ENDPOINTS:
+    _scope = e["time_filter"] if e["time_filter"] else "no time filter"
+    print(
+        " -", e["raw_object_id"], "|", e["endpoint"],
+        "|", _scope, "|", e["request_contract"]
+    )
+print("")
+print("Governed active raw objects configured:", len(_configured_object_ids), "of 11")
+print("Excluded by governance:", sorted(NOT_ACTIVE_ENDPOINTS))
 
 
 # METADATA ********************
@@ -244,6 +587,18 @@ for e in RAW_SIMPLE_ENDPOINTS:
 # - `mews_post` is one safe HTTP call with retries and rate-limit handling.
 #   It only adds a paging block (`Limitation`) when a page size is given, because
 #   the simple endpoints were proven to work without one.
+# - `mews_post` treats a 4xx other than 429 as a request-shape or auth problem:
+#   it does not retry, and it surfaces the Mews explanation instead of a bare
+#   `400 Client Error`. A Mews error body carries a message, not source records.
+#   The request body - which holds the tokens - is never printed.
+# - `daterange_chunks` is defined here so Section 6B does not depend on Section 5
+#   having been run first. Section 5 redefines it identically and is unchanged.
+# 
+# **Schema note (open governance gap):** these schemas are the ORIGINAL D-186
+# field set. The 2026-07-25 D-186 revision additionally requires `PropertyKey`,
+# `SourceType`, `SourcePropertyCode`, `MewsScopeType`, and `MewsScopeIds` on both
+# tables. That change needs governed property/source resolution (D-215, D-223,
+# D-228) and is deliberately not made here.
 
 
 # CELL ********************
@@ -261,6 +616,10 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, TimestampType
 )
+
+class MewsRequestRejected(Exception):
+    """Mews returned a 4xx that retrying cannot fix (request shape or auth)."""
+
 
 # Results of this notebook run, used by the verification section.
 landing_results = {}
@@ -299,6 +658,17 @@ def utc_now():
 def fmt_utc(dt):
     # Mews wants ISO 8601 with milliseconds and Z
     return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def daterange_chunks(start, end, chunk_days):
+    # Bounded window splitter (D-153). Defined here so Section 6B does not
+    # depend on Section 5 having been run first. Section 5 redefines it
+    # identically and is unchanged.
+    cur = start
+    while cur < end:
+        chunk_end = min(cur + timedelta(days=chunk_days), end)
+        yield cur, chunk_end
+        cur = chunk_end
 
 
 def count_records_best_effort(payload, record_keys):
@@ -344,8 +714,25 @@ def mews_post(endpoint, extra_body=None, cursor=None, page_size=None):
                 time.sleep(wait)
                 continue
 
+            # A 4xx other than 429 is a request-shape or auth problem.
+            # Retrying cannot fix it, and Mews explains the problem in the
+            # response body. Surface that message instead of a bare
+            # "400 Client Error". A Mews error body carries a message, not
+            # source records. The request body - which holds the tokens -
+            # is never printed.
+            if 400 <= resp.status_code < 500:
+                detail = (resp.text or "")[:500]
+                raise MewsRequestRejected(
+                    "Mews rejected the request for " + endpoint
+                    + " with HTTP " + str(resp.status_code)
+                    + ". Mews message: " + detail
+                )
+
             resp.raise_for_status()
             return resp.json()
+
+        except MewsRequestRejected:
+            raise
 
         except Exception as ex:
             last_error = ex
@@ -700,6 +1087,198 @@ for endpoint_config in RAW_SIMPLE_ENDPOINTS:
 
 # MARKDOWN ********************
 
+# ## Section 6B - Extract the remaining eight governed active raw objects
+# 
+# Plain words:
+# - This section lands the eight `ActiveForBIv1 = True` objects that the earlier
+#   version of this notebook did not cover: availabilityBlocks, businessSegments,
+#   companies, orderItems, rates, resourceBlocks, resourceCategories, resources.
+# - Every object is paged with a `Limitation` cursor, matching
+#   `LoadMethod = API_PAGED` in `07_Raw_Source_Objects`.
+# - Objects with a Mews time filter are split into bounded chunks with a page cap
+#   per chunk (D-153). Objects with no time filter are pulled as one full paged
+#   sweep, also under a page cap.
+# - Hitting a page cap with more data remaining marks the run `Partial`. Nothing
+#   is silently truncated and nothing is guessed.
+# - Each object gets its own `RunID`, so D-186 stays at one endpoint and one
+#   interval per run.
+# - If Mews rejects a request, the failure is caught per object: that object is
+#   logged `Failed` with the Mews message, and the remaining objects still run.
+#   Section 7 then reports FAIL for it.
+# 
+# **Read the `request_contract` line printed for each object.** `UNVERIFIED` means
+# the request body is the minimum this notebook can send without inventing a
+# filter, and has not been checked against docs.mews.com inside this repo.
+
+
+# CELL ********************
+
+# Section 6B - Remaining governed active raw objects
+# (raw only, D-148/149/151/153/159/186)
+# No I-layer logic. No joins. No mappings. No business logic.
+
+for endpoint_config in RAW_PAGED_ENDPOINTS:
+    raw_object_id = endpoint_config["raw_object_id"]
+    endpoint = endpoint_config["endpoint"]
+    folder = endpoint_config["folder"]
+    record_keys = endpoint_config["record_keys"]
+    static_body = endpoint_config["static_body"]
+    time_filter = endpoint_config["time_filter"]
+    window_start = endpoint_config["window_start_utc"]
+    window_end = endpoint_config["window_end_utc"]
+    chunk_days = endpoint_config["chunk_days"]
+    max_pages = endpoint_config["max_pages_per_chunk"]
+    page_size = endpoint_config["page_size"]
+
+    run_id = str(uuid.uuid4())
+    run_stamp = run_id[:8]
+    run_ts = utc_now().strftime("%Y-%m-%d_%H%M%S")
+    run_start_utc = utc_now()
+
+    status = "Success"
+    error_message = None
+    pages_written = 0
+    record_count = 0
+    files_written = []
+    hit_cap_with_more = False
+
+    print("")
+    print("=======================================================")
+    print("Raw landing: ", raw_object_id)
+    print("Endpoint:    ", endpoint)
+    print("Folder:      ", folder)
+    if time_filter:
+        print("Filter:      ", time_filter)
+        print("Window:      ", window_start.date(), "to", window_end.date())
+        print("Chunking:    ", chunk_days, "days | page cap", max_pages, "per chunk")
+    else:
+        print("Filter:       none - one full paged sweep")
+        print("Page cap:    ", max_pages)
+    print("Contract:    ", endpoint_config["request_contract"])
+    print("RunID:       ", run_id)
+    print("=======================================================")
+    if endpoint_config["request_contract"] != "VERIFIED_IN_PROJECT":
+        print("NOTE: request shape not verified against docs.mews.com in this repo.")
+    print("Note:", endpoint_config["contract_note"])
+
+    try:
+        if time_filter:
+            chunks = list(daterange_chunks(window_start, window_end, chunk_days))
+        else:
+            chunks = [(None, None)]
+
+        for chunk_start, chunk_end in chunks:
+            if time_filter:
+                print("")
+                print("Chunk:", chunk_start.date(), "to", chunk_end.date())
+
+            cursor = None
+            page_index = 0
+
+            while page_index < max_pages:
+                extra_body = dict(static_body)
+                if time_filter:
+                    extra_body[time_filter] = {
+                        "StartUtc": fmt_utc(chunk_start),
+                        "EndUtc": fmt_utc(chunk_end),
+                    }
+
+                payload = mews_post(
+                    endpoint, extra_body, cursor=cursor, page_size=page_size
+                )
+                page_len = count_records_best_effort(payload, record_keys)
+                if page_len == 0:
+                    print("  No more records.")
+                    break
+
+                page_index += 1
+                pages_written += 1
+                record_count += page_len
+
+                name_parts = [endpoint.replace("/", "_"), run_ts, run_stamp]
+                if time_filter:
+                    name_parts.append(chunk_start.strftime("%Y%m%d"))
+                    name_parts.append(chunk_end.strftime("%Y%m%d"))
+                name_parts.append("page_" + str(page_index).zfill(3))
+                file_name = "_".join(name_parts) + ".json"
+
+                file_path = write_json_payload(folder, file_name, payload)
+                files_written.append(file_name)
+
+                append_file_log({
+                    "FileID": str(uuid.uuid4()),
+                    "RunID": run_id,
+                    "PMS": PMS_NAME,
+                    "Endpoint": endpoint,
+                    "PageOrChunkIndex": pages_written,
+                    "FileName": file_name,
+                    "FilePath": file_path,
+                    "RecordCount": page_len,
+                    "WrittenUtc": utc_now()
+                })
+                print("  Page", page_index, ":", page_len, "records ->", file_name)
+
+                cursor = payload.get("Cursor") if isinstance(payload, dict) else None
+                if not cursor:
+                    break
+
+            if page_index >= max_pages and cursor:
+                hit_cap_with_more = True
+                print("  Page cap reached (", max_pages, ") with more data remaining.")
+
+        if hit_cap_with_more:
+            status = "Partial"
+
+    except Exception as ex:
+        status = "Failed"
+        error_message = str(ex)
+        print("")
+        print("LANDING FAILED:", endpoint)
+        print("Error:", error_message)
+        print(traceback.format_exc())
+
+    finally:
+        run_end_utc = utc_now()
+        append_run_log({
+            "RunID": run_id,
+            "PMS": PMS_NAME,
+            "Endpoint": endpoint,
+            "WindowStartUtc": window_start,
+            "WindowEndUtc": window_end,
+            "RunStartUtc": run_start_utc,
+            "RunEndUtc": run_end_utc,
+            "Status": status,
+            "PagesWritten": pages_written,
+            "RecordCount": record_count,
+            "ErrorMessage": error_message
+        })
+        landing_results[endpoint] = {
+            "run_id": run_id,
+            "folder": folder,
+            "files": files_written,
+            "pages_written": pages_written,
+            "record_count": record_count,
+            "status": status,
+            "record_keys": record_keys
+        }
+        print("Finished:", endpoint)
+        print("Status:", status, "| Files:", pages_written, "| Records:", record_count)
+        if status == "Partial":
+            print("NOTE: Partial run. Raise the page cap or narrow the window, then re-run.")
+        if status == "Success" and record_count == 0:
+            print("NOTE: zero records returned. Confirm the request shape before")
+            print("      treating this object as landed.")
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ## Section 7 - Verify this run
 # 
 # Plain words, what "verified" means here:
@@ -707,11 +1286,16 @@ for endpoint_config in RAW_SIMPLE_ENDPOINTS:
 # 2. Re-opening those files and re-counting records matches the logged counts.
 # 3. `ExtractionRunLog` has exactly one row for this run per endpoint.
 # 4. `ExtractionFileLog` rows match the number of files written.
+# 5. All eleven governed `ActiveForBIv1 = True` objects were landed in this
+#    session, and nothing outside that governed set was landed.
 # 
 # Each endpoint gets a PASS / CHECK / FAIL verdict.
 # - PASS  = safe to move on.
 # - CHECK = landed, but with a note (for example a Partial run) - read the note.
 # - FAIL  = do not run the build notebook until this is fixed.
+# 
+# An object that returns zero records is reported as a note, not a failure: zero
+# can be a true source state. Confirm the request shape before relying on it.
 
 
 # CELL ********************
@@ -812,6 +1396,44 @@ print("=======================================================")
 for line in summary_lines:
     print(line)
 
+# --- Governed scope completeness for this run (D-159 + D-201) ---
+print("")
+print("=======================================================")
+print("GOVERNED SCOPE COMPLETENESS")
+print("=======================================================")
+
+landed_endpoints = set(landing_results.keys())
+missing_from_run = sorted(GOVERNED_ACTIVE_ENDPOINTS - landed_endpoints)
+unexpected_in_run = sorted(landed_endpoints - GOVERNED_ACTIVE_ENDPOINTS)
+zero_record_objects = sorted(
+    ep for ep, r in landing_results.items() if r["record_count"] == 0
+)
+
+print("Governed active raw objects expected:", len(GOVERNED_ACTIVE_ENDPOINTS))
+print("Objects landed in this session:      ", len(landed_endpoints))
+
+if missing_from_run:
+    overall_ok = False
+    print("MISSING - governed active objects not landed in this session:")
+    for ep in missing_from_run:
+        print(" -", ep)
+
+if unexpected_in_run:
+    overall_ok = False
+    print("UNEXPECTED - landed but not in the governed active set:")
+    for ep in unexpected_in_run:
+        print(" -", ep)
+
+if zero_record_objects:
+    print("NOTE - landed with zero records. Confirm the request shape")
+    print("       before relying on these:")
+    for ep in zero_record_objects:
+        print(" -", ep)
+
+if not missing_from_run and not unexpected_in_run:
+    print("Scope matches the eleven ActiveForBIv1 objects in")
+    print("07_Raw_Source_Objects.")
+
 print("")
 if overall_ok:
     print("All Phase-1 raw inputs landed and verified for this run.")
@@ -890,12 +1512,18 @@ display(
 
 # ## Section 9 - Wrap-up
 # 
-# If Section 7 shows PASS for all three endpoints:
+# If Section 7 shows PASS for all eleven governed active raw objects, and the
+# scope-completeness block reports no missing and no unexpected objects:
 # 
 # 1. Confirm the results yourself (files under `Files/Raw/Mews/...`, log rows above).
 # 2. Commit this notebook to GitHub from workspace Source control,
 #    and confirm GitHub actually updated.
 # 3. Continue with `NB_Menja_Phase1_10_I_Reservations_BUILD_DRAFT`.
+# 
+# If any of the eight objects added by the amendment failed with a Mews 4xx, read
+# the Mews message printed by Section 6B, verify the endpoint's request contract
+# against docs.mews.com, then correct that object's entry in `RAW_PAGED_ENDPOINTS`
+# in Section 3. Do not guess a filter.
 # 
 # This notebook never deletes or moves files. If Section 1 warned about a
 # lowercase `Files/raw` folder, decide manually what to do with it.

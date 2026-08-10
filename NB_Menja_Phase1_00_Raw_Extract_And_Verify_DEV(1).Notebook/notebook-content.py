@@ -282,6 +282,36 @@ RAW_SIMPLE_ENDPOINTS = [
 # --- Reservations scope (committed pattern) ---
 # Mews demo service ID published in Mews docs. Proper lookup added later.
 RES_SERVICE_IDS = ["bd26d8db-86da-4f96-9efc-e5a4654a4a94"]
+RES_SERVICE_IDS_I215 = [
+    "bd26d8db-86da-4f96-9efc-e5a4654a4a94",   # already pulled
+    "f38cac87-196b-4a5a-9c45-b046006ba01b",   # 2079 order items
+    "66867ec0-62dc-4937-b04b-b37100ab60c1",   # 537 order items
+    "a04a7571-7225-4bf2-8ddc-b36e016074b6",   # 175 order items
+    "bcc5ce3a-0b73-4746-802d-b30100b05bf0",   # 129 order items
+    "a804d717-8cf7-47a3-9535-af6a009d869c",   # 127 order items
+    "bd9aedba-3ad5-4367-bb13-b1d900c33e77",   # 90 order items
+    "d9b3720a-faba-4292-95fe-b2e900cbe332",   # 76 order items
+    "7d35e0b2-9739-411e-9078-b3b7013dc9a3",   # 69 order items
+    "539e0194-3e0f-4457-b480-b1e900ba96c6",   # 66 order items
+    "da46c24a-e867-4b70-aa43-b28a000547c8",   # 32 order items
+    "0503c3bd-11ae-497a-a97d-b19600a43124",   # 32 order items
+    "a6aee71c-40e4-4f88-9e33-b18c013858d6",   # 30 order items
+    "12b0e869-d697-4f59-8fe0-b38b00ea83fd",   # 29 order items
+    "9c4f488b-367c-423d-916c-af8e00e4e888",   # 28 order items
+    "63c61063-4a47-4566-825c-b2bf00b905af",   # 19 order items
+    "ec9d261c-1ef1-4a6e-8565-ad7200d77411",   # 17 order items
+    "b88188db-ba23-4bbb-bdfd-b14f00a637f4",   # 12 order items
+    "6dc3e202-0192-43c4-bf6a-b191010fdf18",   # 8 order items
+    "a47dce07-dfc0-42ac-9db1-afbd00964cc0",   # 7 order items
+    "c5432c47-ae24-4e69-a779-b05100b8284c",   # 6 order items
+    "15c4328d-d488-422b-8ed0-b046008bedc3",   # 4 order items
+    "4ffcafa0-fe14-46e6-ad12-b24a00d80cd8",   # 2 order items
+    "c22a16ba-f017-4b93-be76-b15d00c4fe61",   # 2 order items
+    "35b42568-b7f3-4fb4-bca8-b06e007fa9d8",   # 2 order items
+    "58332a85-89a1-4fb7-b896-b0a00115744d",   # 1 order items
+    "8b1fe3bb-d69f-4ac6-9fbf-b05100b75adb",   # 1 order items
+    "c66ddb5d-73cd-433d-b83d-b1d100cfeea6",   # 1 order items
+]
 
 # --- Bounded date window for reservations (D-153) ---
 WINDOW_START_UTC = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -289,7 +319,7 @@ WINDOW_END_UTC   = datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 # --- Chunking and page caps for reservations (D-153) ---
 RES_CHUNK_DAYS = 7
-RES_MAX_PAGES_PER_CHUNK = 5
+RES_MAX_PAGES_PER_CHUNK = 20
 RES_PAGE_SIZE = 1000
 
 # --- Network safety ---
@@ -874,7 +904,7 @@ try:
 
         while page_index < RES_MAX_PAGES_PER_CHUNK:
             extra_body = {
-                "ServiceIds": RES_SERVICE_IDS,
+                "ServiceIds": RES_SERVICE_IDS_I215,
                 "CollidingUtc": {
                     "StartUtc": fmt_utc(chunk_start),
                     "EndUtc": fmt_utc(chunk_end),

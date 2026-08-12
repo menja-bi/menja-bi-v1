@@ -22,39 +22,38 @@
 
 # MARKDOWN ********************
 
-# # F_RoomNights + D_Date — BUILD_DRAFT — Phase-1 Mews slice
+# # F_RoomNights + D_Date — BUILD_DRAFT — Phase-1 Mews slice + governed revenue carry
 # 
 # **Plain words:** this notebook reads the already-built `I_RoomNights` table and creates the
 # first **gold-layer** tables: `F_RoomNights` (the fact table Power BI will read) and `D_Date`
-# (the calendar table). It keeps only the room-nights that actually take a room out of
-# inventory (Confirmed / Started / Processed), and it keeps **every stored snapshot version**
-# of those room-nights, so history stays visible.
+# (the calendar table). It keeps **every** reservation status and resolves current state at
+# build: each reservation's latest snapshot version enters the fact (D-209). It carries the
+# six governed revenue columns unchanged from those rows and computes `RoomRevenue` from them
+# (D-245).
 # 
 # **Status:** DRAFT for user review. Nothing here is run, committed, or done until the user
 # runs it in Fabric and confirms the results.
 # 
-# **Governance basis (all FINAL, validated against the uploaded `Menja_Schema_Governance_0626.xlsx` on 2026-07-14):**
+# **Governance basis (all FINAL):**
 # 
 # | Rule | Decision / source |
 # |---|---|
-# | Build slice scope: input = built `I_RoomNights` only; carry all snapshot versions; NULL override for ungoverned columns; parameterized `D_Date` build with coverage guarantee | D-208 (FINAL, locked 14.07.2026) |
-# | Row selection: keep **all** reservation statuses; resolve **current state at build** - keep each reservation's latest version (`MAX(SnapshotDateTime)` per `ReservationID`) | D-209 (FINAL) - supersedes the D-208/D-125 deduct row filter |
-# | Snapshot-aware fact; current state resolved **at build, per reservation** (not later in measures) | D-209 (supersedes C-203) |
+# | Build slice scope: input = built `I_RoomNights` only; NULL override for remaining ungoverned columns; parameterized `D_Date` build with coverage guarantee | D-208 |
+# | Row selection: keep **all** reservation statuses; resolve current state at build — keep each reservation's latest version (`MAX(SnapshotDateTime)` per `ReservationID`) | D-209 (supersedes the D-208/D-125 deduct row filter) |
+# | Revenue carry: `CurrencyCode`, both revenue amounts, `RevenueState`, both derivation methods carried unchanged from the D-209-selected row; no aggregation, no re-derivation | D-245 (C-218, C-219, C-220, C-222, C-223, C-224) |
+# | `RoomRevenue` (C-221): realized when not blank, otherwise booked, blank when both are blank — computed at build | D-245, under the D-125 precedence |
 # | `F_RoomNights.RoomNightID` stays identical to `I_RoomNights.RoomNightID`; no separate key | C-198 / D-125 |
 # | `IsDayUse` carried from `I_RoomNights`; overnight KPIs exclude it by default (later, in measures) | C-415 / D-206 / D-048 |
-# | `D_Date` structure: 7 ACTIVE columns C-029..C-035; `DateKey` yyyymmdd integer, one-to-one with `Date` | D-047 / D-208 |
-# | Week-start convention for v1: **Monday = 1** (ISO 8601) | D-208 Notes, confirmed FINAL 2026-07-14 |
-# | `F_RoomNights.StayDate` → `D_Date.Date` relationship (semantic model); this notebook guarantees date **coverage** only | R-005 / D-125 |
+# | `D_Date` structure: 7 ACTIVE columns C-029..C-035; `DateKey` yyyymmdd integer, one-to-one with `Date`; Monday = 1 | D-047 / D-208 |
 # | Governed F_RoomNights column contract: 33 columns | 03_Columns C-198..C-226, C-382, C-402, C-403, C-415 |
 # 
-# **Explicitly NOT in this notebook (per D-208 out-of-scope):** revenue population or allocation,
-# `CurrencyCode` sourcing, room-type / rate-plan / channel / segment lookups, block or event
-# linkage, `F_GroupBlockSnapshot`, the room-night influence bridge, **measures** (including the
-# PLANNED `D_Date` measure-only flags C-036 / C-037), no-show treatment (I-186), multi-room
-# beyond `BookedRoomIndex = 1`, incremental/change-aware append logic, and international /
-# localized calendar conventions (alternative week starts, local-language names, week numbering,
-# fiscal calendars — future additive work under I-197). Those columns are written as honest
-# NULLs (see Section 6) or simply not built.
+# **Explicitly NOT in this notebook:** room-type / rate-plan / channel / segment lookups,
+# block or event linkage (incl. `IsBlockPickupRoomNight`), `RevenueStreamKey`,
+# `F_GroupBlockSnapshot`, the influence bridge, **measures**, no-show treatment (I-186),
+# multi-room beyond `BookedRoomIndex = 1`, incremental logic, and international calendar
+# conventions (I-197). The nine columns that remain ungoverned, parked or deferred are
+# written as honest NULLs (see Section 6) — D-245 keeps the write-NULL override in force for
+# exactly those nine.
 
 
 # MARKDOWN ********************
@@ -216,18 +215,23 @@ print(f"I_RoomNights rows (all snapshot versions): {n_in_rows}")
 if n_in_rows == 0:
     raise RuntimeError("I_RoomNights is empty — nothing to build. Stop.")
 
-# The 17 columns this slice carries (populated), per 03_Columns + D-208.
+# The 23 columns this build carries (populated), per 03_Columns + D-208 + D-245.
+# The six revenue columns joined the carry on 2026-08-11 under D-245.
 CARRIED_COLS = [
     "RoomNightID", "ReservationID", "PropertyKey", "PropertyID", "StayDate",
     "SnapshotDateTime", "ReservationStatusKey", "IsGroupReservation", "BookingDateTime",
     "ArrivalDate", "DepartureDate", "LOS_Nights", "BookingWindowDays", "IsLatestCurrent",
     "TenantKey", "TenantID", "IsDayUse",
+    # D-245 revenue carry (nullable by governed rule, D-241 / D-242):
+    "CurrencyCode", "BookedRoomRevenue_RoomNight", "RealizedRoomRevenue_RoomNight",
+    "RevenueState", "BookedRevenueDerivationMethod", "RealizedRevenueDerivationMethod",
 ]
 missing = [c for c in CARRIED_COLS if c not in df_in.columns]
 if missing:
     raise RuntimeError(f"I_RoomNights is missing carried column(s) {missing}. "
-                       "The input does not match the governed contract — stop.")
-print("All 17 carried columns present in input.")
+                       "The input does not match the governed contract — stop. "
+                       "(Revenue columns require the amended NB20 to have run first.)")
+print("All 23 carried columns present in input.")
 
 # Gate: RoomNightID not NULL + unique.
 n_null_id = df_in.filter(F.col("RoomNightID").isNull()).count()
@@ -239,13 +243,17 @@ if n_dup_id:
                        "fix I_RoomNights before building the fact.")
 print("RoomNightID null/uniqueness gates OK.")
 
-# D-236 (FINAL): PropertyID (C-201 on this fact, carried from I_RoomNights C-356) is
-# nullable and remains an unpopulated, traceability-only attribute for as long as
-# I_Reservations.PropertyID (C-283) is unpopulated under D-235/BND-RES-004. It must
-# still exist as a column (checked above via CARRIED_COLS) but is excluded from the
-# not-null gate below. PropertyKey (unaffected by D-236) remains the sole relationship
-# key and stays fully enforced.
-CARRIED_NOT_NULL_INPUT_COLS = [c for c in CARRIED_COLS if c != "PropertyID"]
+# D-236 (FINAL): PropertyID is nullable and remains an unpopulated, traceability-only
+# attribute. The six revenue columns are nullable BY GOVERNED RULE: blank when no
+# qualifying revenue exists on the night (D-241) or when the property currency could
+# not be resolved (D-242). All seven are therefore excluded from the not-null gate.
+# PropertyKey remains the sole relationship key and stays fully enforced.
+NULLABLE_CARRIED_COLS = [
+    "PropertyID",
+    "CurrencyCode", "BookedRoomRevenue_RoomNight", "RealizedRoomRevenue_RoomNight",
+    "RevenueState", "BookedRevenueDerivationMethod", "RealizedRevenueDerivationMethod",
+]
+CARRIED_NOT_NULL_INPUT_COLS = [c for c in CARRIED_COLS if c not in NULLABLE_CARRIED_COLS]
 
 # Gate: carried not-null columns clean on the input side.
 for c in CARRIED_NOT_NULL_INPUT_COLS:
@@ -253,7 +261,7 @@ for c in CARRIED_NOT_NULL_INPUT_COLS:
     if n_null:
         raise RuntimeError(f"Input column '{c}' has {n_null} NULLs but is governed "
                            "not-null on the fact. Fix upstream — no silent patching.")
-print("Carried not-null columns (excl. PropertyID, D-236) are clean on input.")
+print("Carried not-null columns (excl. PropertyID + revenue, D-236/D-241/D-242) are clean on input.")
 
 # METADATA ********************
 
@@ -382,31 +390,26 @@ if n_pass == 0:
 
 # MARKDOWN ********************
 
-# ## 6. Assemble the governed 33-column fact (D-208 NULL rule)
+# ## 6. Assemble the governed 33-column fact (D-208 NULL rule + D-245 revenue carry)
 # 
 # **Plain words:** the `F_RoomNights` contract has **33 columns** (`03_Columns`, C-198..C-226
-# plus C-382, C-402, C-403, C-415). This slice fills the **17 carried columns** straight from
-# `I_RoomNights` and writes the **16 ungoverned columns as literal NULL** — no fallback, no
-# placeholder, no UNKNOWN key, no guessed lookup. NULL means, honestly: "not governed / not
-# implemented in this slice".
+# plus C-382, C-402, C-403, C-415). This build fills **24 columns**: the 17 original carries,
+# the six revenue columns carried unchanged from the D-209-selected current rows (D-245), and
+# `RoomRevenue`, computed at build as realized-else-booked under the D-125 precedence —
+# realized when not blank, otherwise booked, blank when both are blank. `coalesce` implements
+# exactly that rule; a realized value of 0 is a value, not a blank.
 # 
-# Columns intentionally NULL, with the blocking issue:
+# The **9 remaining columns are written as literal NULL** — no fallback, no placeholder, no
+# UNKNOWN key. D-245 keeps the D-208 write-NULL override in force for exactly these nine:
 # 
-# - `CurrencyCode`, `BookedRoomRevenue_RoomNight`, `RealizedRoomRevenue_RoomNight`,
-#   `RoomRevenue`, `RevenueState`, `BookedRevenueDerivationMethod`,
-#   `RealizedRevenueDerivationMethod`, `RevenueStreamKey` — revenue/currency allocation open (I-196)
 # - `RoomTypeKey`, `RatePlanKey`, `ChannelKey`, `SegmentKey` — lookups not governed
 # - `MarketCountryKey` — upstream ungoverned
 # - `BlockID`, `EventID`, `IsBlockPickupRoomNight` — block/event linkage deferred
+# - `RevenueStreamKey` — remediation open
 # 
-# **Transparency note:** several of these are marked not-null in `03_Columns`. **D-208
-# explicitly overrides `NullableFlag = No` for these columns for this slice.** The not-null
-# contract applies when they are actually built later.
-# 
-# **One nuance - `IsLatestCurrent`:** carried as-is from `I_RoomNights` (C-226). Under D-209 the
-# fact already holds only each reservation's latest version, so current state is resolved **at
-# build, per reservation**, not later in measures. The flag is not recomputed here - that would
-# be invented logic.
+# **One nuance — `IsLatestCurrent`:** carried as-is from `I_RoomNights` (C-226). Under D-209
+# the fact already holds only each reservation's latest version. The flag is not recomputed
+# here — that would be invented logic.
 # 
 # The physical column order below follows the `03_Columns` listing order.
 
@@ -414,7 +417,7 @@ if n_pass == 0:
 # CELL ********************
 
 # ---------------------------------------------------------------
-# 6. Final projection: 33 columns — carried values + governed NULLs.
+# 6. Final projection: 33 columns — carried values + D-245 revenue + governed NULLs.
 # ---------------------------------------------------------------
 def null_str():   return F.lit(None).cast("string")
 def null_dbl():   return F.lit(None).cast("double")
@@ -428,13 +431,13 @@ df_fact = df_pass.select(
     F.col("PropertyID"),                                    # C-201
     F.col("StayDate"),                                      # C-202  R-005 date key
     F.col("SnapshotDateTime"),                              # C-203  snapshot-aware
-    # --- governed NULLs (D-208 override) ---
+    # --- governed NULLs (D-208 override, retained by D-245) ---
     null_str().alias("RoomTypeKey"),                        # C-204
     null_str().alias("RatePlanKey"),                        # C-205
     null_str().alias("ChannelKey"),                         # C-206
     null_str().alias("SegmentKey"),                         # C-207
     # --- carried ---
-    F.col("ReservationStatusKey"),                          # C-208  deduct filter key
+    F.col("ReservationStatusKey"),                          # C-208
     # --- governed NULLs ---
     null_str().alias("MarketCountryKey"),                   # C-209
     null_str().alias("BlockID"),                            # C-210
@@ -446,14 +449,17 @@ df_fact = df_pass.select(
     F.col("DepartureDate"),                                 # C-215
     F.col("LOS_Nights"),                                    # C-216
     F.col("BookingWindowDays"),                             # C-217
-    # --- governed NULLs (I-196) ---
-    null_str().alias("CurrencyCode"),                       # C-218
-    null_dbl().alias("BookedRoomRevenue_RoomNight"),        # C-219
-    null_dbl().alias("RealizedRoomRevenue_RoomNight"),      # C-220
-    null_dbl().alias("RoomRevenue"),                        # C-221 (derived later, NULL now)
-    null_str().alias("RevenueState"),                       # C-222
-    null_str().alias("BookedRevenueDerivationMethod"),      # C-223
-    null_str().alias("RealizedRevenueDerivationMethod"),    # C-224
+    # --- D-245 revenue carry: unchanged from the D-209-selected row ---
+    F.col("CurrencyCode"),                                  # C-218  D-242 via carry
+    F.col("BookedRoomRevenue_RoomNight"),                   # C-219  carry
+    F.col("RealizedRoomRevenue_RoomNight"),                 # C-220  carry
+    # --- D-245 computed at build: realized else booked, blank when both blank (D-125) ---
+    F.coalesce(F.col("RealizedRoomRevenue_RoomNight"),
+               F.col("BookedRoomRevenue_RoomNight")).alias("RoomRevenue"),  # C-221
+    F.col("RevenueState"),                                  # C-222  carry (D-241 values)
+    F.col("BookedRevenueDerivationMethod"),                 # C-223  carry
+    F.col("RealizedRevenueDerivationMethod"),               # C-224  carry
+    # --- governed NULL ---
     null_bool().alias("IsBlockPickupRoomNight"),            # C-225 (D-080, deferred)
     # --- carried ---
     F.col("IsLatestCurrent"),                               # C-226  carried as-is (see note)
@@ -700,12 +706,11 @@ print(f"Deduct-TRUE upstream rows missing from fact: {n_missing} -> "
 print(f"Fact column count: {len(t_fact.columns)} -> "
       f"{'OK' if len(t_fact.columns) == 33 else 'FAIL'}")
 
+# The seven revenue columns left this list on 2026-08-11 under D-245.
+# Their governed-rule checks live in Section 9e.
 UNGOVERNED_NULL_COLS = [
     "RoomTypeKey", "RatePlanKey", "ChannelKey", "SegmentKey", "MarketCountryKey",
-    "BlockID", "EventID", "CurrencyCode", "BookedRoomRevenue_RoomNight",
-    "RealizedRoomRevenue_RoomNight", "RoomRevenue", "RevenueState",
-    "BookedRevenueDerivationMethod", "RealizedRevenueDerivationMethod",
-    "IsBlockPickupRoomNight", "RevenueStreamKey",
+    "BlockID", "EventID", "IsBlockPickupRoomNight", "RevenueStreamKey",
 ]
 CARRIED_NOT_NULL_COLS = [
     "RoomNightID", "ReservationID", "PropertyKey", "StayDate",
@@ -713,10 +718,10 @@ CARRIED_NOT_NULL_COLS = [
     "ArrivalDate", "DepartureDate", "LOS_Nights", "BookingWindowDays", "IsLatestCurrent",
     "TenantKey", "TenantID", "IsDayUse",
 ]
-# D-236 (FINAL): PropertyID (C-201) is nullable and excluded from the list above —
-# checked separately below, since its expected 100% NULL is a specific governed
-# correction (D-236), not general ungoverned business logic like the columns in
-# UNGOVERNED_NULL_COLS.
+# D-236 (FINAL): PropertyID (C-201) is nullable and checked separately below.
+# The seven revenue columns (C-218..C-224) are nullable BY GOVERNED RULE
+# (D-241 blank-when-no-revenue, D-242 blank-on-unresolved-currency) and are
+# validated against those rules in Section 9e, not against a NULL profile here.
 
 all_ok = True
 for c in UNGOVERNED_NULL_COLS:
@@ -724,8 +729,8 @@ for c in UNGOVERNED_NULL_COLS:
     ok = n_not_null == 0
     all_ok = all_ok and ok
     if not ok:
-        print(f"  {c}: {n_not_null} non-NULL values -> FAIL (must be 100% NULL, D-208)")
-print(f"100% NULL on all 16 ungoverned columns -> {'OK' if all_ok else 'FAIL'}")
+        print(f"  {c}: {n_not_null} non-NULL values -> FAIL (must be 100% NULL, D-208/D-245)")
+print(f"100% NULL on all 9 ungoverned columns -> {'OK' if all_ok else 'FAIL'}")
 
 all_ok = True
 for c in CARRIED_NOT_NULL_COLS:
@@ -736,8 +741,7 @@ for c in CARRIED_NOT_NULL_COLS:
         print(f"  {c}: {n_null} NULL values -> FAIL (governed not-null)")
 print(f"0% NULL on all 16 carried not-null columns -> {'OK' if all_ok else 'FAIL'}")
 
-# D-236 (FINAL): PropertyID (C-201) is nullable, ACTIVE, and expected to remain
-# 100% NULL for now (traceability-only; never a resolution/relationship key).
+# D-236 (FINAL): PropertyID (C-201) expected to remain 100% NULL for now.
 n_propertyid_not_null = t_fact.filter(F.col("PropertyID").isNotNull()).count()
 print(f"  PropertyID: {n_propertyid_not_null} non-NULL values -> "
       f"{'OK' if n_propertyid_not_null == 0 else 'FAIL'} (D-236: expected 100% NULL for now)")
@@ -858,25 +862,123 @@ if n_uncovered:
 
 # MARKDOWN ********************
 
+# ## 9e. Revenue carry validation (NEW — D-245 / D-241 / D-242)
+# 
+# **Plain words:** prove, on the **written** fact, that the carry did exactly what D-245
+# governs and nothing else:
+# 
+# 1. **Carry equality:** each of the six carried revenue values equals its upstream
+#    `I_RoomNights` value on the same `RoomNightID` — null-safe, so a governed blank must
+#    stay blank. Zero differences allowed; any difference means re-derivation happened.
+# 2. **`RoomRevenue` rule:** realized when realized is not blank, otherwise booked, blank
+#    when both are blank. Zero violations allowed.
+# 3. **Value lists and pairing (D-241)** and **currency coherence (D-242)** re-checked on
+#    the fact, so a carry bug cannot silently break them downstream.
+# 4. **Visibility, not a check:** revenue split by `InventoryDeduct`. Under I-186 (OPEN), a
+#    charged no-show maps to `Canceled` (`InventoryDeduct` FALSE) while D-209 keeps its room
+#    nights in the fact — so its revenue drops out of every deduct-filtered figure and
+#    appears in every unfiltered one. Printed so the numbers are read correctly.
+
+
+# CELL ********************
+
+# ---------------------------------------------------------------
+# 9e. Revenue carry checks (D-245 / D-241 / D-242).
+# ---------------------------------------------------------------
+REV_CARRY_COLS = ["CurrencyCode", "BookedRoomRevenue_RoomNight",
+                  "RealizedRoomRevenue_RoomNight", "RevenueState",
+                  "BookedRevenueDerivationMethod", "RealizedRevenueDerivationMethod"]
+
+# 1. Carry equality per RoomNightID (null-safe; carried unchanged means exact equality).
+_f = t_fact.select(["RoomNightID"] + [F.col(c).alias(f"_f_{c}") for c in REV_CARRY_COLS])
+_i = t_in.select(["RoomNightID"] + [F.col(c).alias(f"_i_{c}") for c in REV_CARRY_COLS])
+_cmp = _f.join(_i, "RoomNightID", "inner")
+all_ok = True
+for c in REV_CARRY_COLS:
+    n_diff = _cmp.filter(~F.col(f"_f_{c}").eqNullSafe(F.col(f"_i_{c}"))).count()
+    ok = n_diff == 0
+    all_ok = all_ok and ok
+    print(f"Carry equality {c}: {n_diff} differences -> {'OK' if ok else 'FAIL'}")
+print(f"Six-column carry unchanged (D-245) -> {'OK' if all_ok else 'FAIL'}")
+
+# 2. RoomRevenue = realized else booked, blank when both blank (D-245 / D-125).
+n_rr_bad = t_fact.filter(
+    (F.col("RealizedRoomRevenue_RoomNight").isNotNull() &
+     ~F.col("RoomRevenue").eqNullSafe(F.col("RealizedRoomRevenue_RoomNight"))) |
+    (F.col("RealizedRoomRevenue_RoomNight").isNull() &
+     F.col("BookedRoomRevenue_RoomNight").isNotNull() &
+     ~F.col("RoomRevenue").eqNullSafe(F.col("BookedRoomRevenue_RoomNight"))) |
+    (F.col("RealizedRoomRevenue_RoomNight").isNull() &
+     F.col("BookedRoomRevenue_RoomNight").isNull() &
+     F.col("RoomRevenue").isNotNull())).count()
+print(f"RoomRevenue precedence violations: {n_rr_bad} -> {'OK' if n_rr_bad == 0 else 'FAIL'}")
+
+# 3. D-241 value lists + pairing, and D-242 coherence, on the fact.
+n_bad_state = t_fact.filter(F.col("RevenueState").isNotNull() &
+    ~F.col("RevenueState").isin(["BOOKED", "REALIZED"])).count()
+n_bad_meth = t_fact.filter(
+    (F.col("BookedRevenueDerivationMethod").isNotNull() &
+     (F.col("BookedRevenueDerivationMethod") != "CONSUMED")) |
+    (F.col("RealizedRevenueDerivationMethod").isNotNull() &
+     (F.col("RealizedRevenueDerivationMethod") != "CONSUMED"))).count()
+n_pair = t_fact.filter(
+    (F.col("BookedRoomRevenue_RoomNight").isNotNull() !=
+     F.col("BookedRevenueDerivationMethod").isNotNull()) |
+    (F.col("RealizedRoomRevenue_RoomNight").isNotNull() !=
+     F.col("RealizedRevenueDerivationMethod").isNotNull()) |
+    (F.col("RevenueState").isNotNull() !=
+     (F.col("BookedRoomRevenue_RoomNight").isNotNull() |
+      F.col("RealizedRoomRevenue_RoomNight").isNotNull()))).count()
+n_ccy = t_fact.filter(F.col("CurrencyCode").isNull() &
+    (F.col("BookedRoomRevenue_RoomNight").isNotNull() |
+     F.col("RealizedRoomRevenue_RoomNight").isNotNull() |
+     F.col("RoomRevenue").isNotNull() |
+     F.col("RevenueState").isNotNull())).count()
+print(f"Value-list violations:        {n_bad_state + n_bad_meth} -> "
+      f"{'OK' if n_bad_state + n_bad_meth == 0 else 'FAIL'}")
+print(f"Pairing violations:           {n_pair} -> {'OK' if n_pair == 0 else 'FAIL'}")
+print(f"Currency coherence breaks:    {n_ccy} -> {'OK' if n_ccy == 0 else 'FAIL'}")
+
+# 4. Visibility: revenue by deduct flag (I-186 context, not a check).
+print("\nRevenue by InventoryDeduct (I-186: no-show revenue sits on non-deducting "
+      "Canceled rows — present in unfiltered figures, absent from deduct-filtered ones):")
+(t_fact.join(df_drs_chk, "ReservationStatusKey", "left")
+    .groupBy("_ded")
+    .agg(F.count(F.when(F.col("RevenueState").isNotNull(), 1)).alias("RevenueRows"),
+         F.sum("BookedRoomRevenue_RoomNight").alias("BookedSum"),
+         F.sum("RealizedRoomRevenue_RoomNight").alias("RealizedSum"),
+         F.sum("RoomRevenue").alias("RoomRevenueSum"))
+    .show(truncate=False))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ## 10. Wrap-up — honest status
 # 
 # **Plain words:** when this notebook has run, `F_RoomNights` and `D_Date` exist in the DEV
-# lakehouse as Delta tables — nothing more. This is **not** done, committed, or
-# governed-complete until:
+# lakehouse as Delta tables, with the seven D-245 revenue columns populated — nothing more.
+# This is **not** done, committed, or governed-complete until:
 # 
-# 1. You confirm the run and inspect the Section 9 results (paste them into the session if
-#    you want them documented).
+# 1. You confirm the run and inspect the Section 9 results, including the new 9e revenue
+#    carry checks.
 # 2. You commit the notebook to GitHub (`menja-bi/menja-bi-v1`) if you want it versioned.
 # 3. Any follow-up documentation is handed to Copilot.
 # 
-# **Not created here, by design:** the R-005 relationship itself (that lives in the semantic
-# model, not the lakehouse — this notebook only guarantees the date coverage behind it),
-# measures, and everything on the D-208 exclusion list.
+# **Not created here, by design:** the R-005 relationship (semantic model), measures — no
+# revenue, ADR or RevPAR measure exists yet and none is created here — and everything on the
+# D-208 exclusion list.
 # 
-# **Out of scope, still blocked, unchanged:** revenue and `CurrencyCode` (I-196), room-type /
-# rate-plan / channel / segment lookups, block/event linkage (incl. `IsBlockPickupRoomNight`,
-# I-101), no-show treatment (I-186), international calendar conventions (I-197), multi-room
-# mechanics, incremental loads.
+# **Out of scope, still blocked, unchanged:** room-type / rate-plan / channel / segment
+# lookups, block/event linkage (incl. `IsBlockPickupRoomNight`, I-101), `RevenueStreamKey`,
+# no-show treatment (I-186), version handling in measures (I-198), international calendar
+# conventions (I-197), multi-room mechanics, incremental loads.
 # 
 # **Pause Fabric capacity `fabaurorabiv1devf2` in Azure if you are done working, to avoid
 # unnecessary cost.**
